@@ -86,6 +86,7 @@ export interface HealthResponse {
   hasApiKey: boolean
   textModel: string
   imageModel: string
+  apiBaseUrl: string
 }
 
 export interface SavedProject extends XhsProject {

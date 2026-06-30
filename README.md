@@ -31,10 +31,13 @@ npm run dev
 
 ```bash
 OPENAI_API_KEY=你的 key
+OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_TEXT_MODEL=gpt-5.5
 OPENAI_IMAGE_MODEL=gpt-image-2
 PORT=8787
 ```
+
+`OPENAI_BASE_URL` 用完整的 OpenAI 兼容 API 地址。官方默认值是 `https://api.openai.com/v1`。
 
 前端地址：
 

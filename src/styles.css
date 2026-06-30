@@ -133,6 +133,13 @@ textarea:focus-visible {
   border-color: rgba(185, 129, 25, 0.34);
 }
 
+.status-pill.api-url {
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .workspace {
   display: grid;
   grid-template-columns: minmax(280px, 360px) minmax(520px, 1fr) minmax(300px, 380px);

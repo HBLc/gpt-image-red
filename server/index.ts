@@ -12,6 +12,9 @@ const app = express()
 const port = Number(process.env.PORT || 8787)
 const textModel = process.env.OPENAI_TEXT_MODEL || 'gpt-5.5'
 const imageModel = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2'
+const apiBaseUrl = (process.env.OPENAI_BASE_URL || process.env.OPENAI_API_URL || 'https://api.openai.com/v1')
+  .trim()
+  .replace(/\/+$/, '')
 
 app.use(cors())
 app.use(express.json({ limit: '32mb' }))
@@ -24,7 +27,10 @@ function getClient(): OpenAI {
   if (!hasApiKey()) {
     throw new Error('OPENAI_API_KEY is not configured')
   }
-  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  return new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+    baseURL: apiBaseUrl,
+  })
 }
 
 function readOutputText(response: unknown): string {
@@ -144,6 +150,7 @@ app.get('/api/health', (_req, res) => {
     hasApiKey: hasApiKey(),
     textModel,
     imageModel,
+    apiBaseUrl,
   }
   res.json(body)
 })

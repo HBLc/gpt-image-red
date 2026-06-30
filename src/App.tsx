@@ -87,6 +87,7 @@ export default function App() {
         hasApiKey: false,
         textModel: 'unknown',
         imageModel: 'gpt-image-2',
+        apiBaseUrl: 'https://api.openai.com/v1',
       } as HealthResponse)
     })
     setHistory(loadHistory())
@@ -224,6 +225,7 @@ export default function App() {
             {health?.hasApiKey ? 'OpenAI 已配置' : '模拟模式'}
           </span>
           <span className="status-pill">{health?.imageModel ?? 'gpt-image-2'}</span>
+          <span className="status-pill api-url">{health?.apiBaseUrl ?? 'https://api.openai.com/v1'}</span>
         </div>
       </header>
 
