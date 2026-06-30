@@ -119,44 +119,99 @@ function textareaRows(value: string, minRows: number): number {
   return Math.max(minRows, rows)
 }
 
-function buildDraftImagePrompt(project: XhsProject, page: XhsPage): string {
-  const pageText = [
-    `主标题：${page.headline}`,
-    page.subhead ? `副标题：${page.subhead}` : '',
-    page.bullets.length ? `要点：${page.bullets.join('；')}` : '',
-    page.visualBrief ? `画面：${page.visualBrief}` : '',
-  ].filter(Boolean).join('\n')
+function pageTypeLabel(type: XhsPage['type']): string {
+  if (type === 'cover') return '封面'
+  if (type === 'summary') return '总结'
+  return '内容'
+}
 
-  const outline = project.pages
-    .map((item) => `${item.index + 1}. ${item.id === page.id ? page.headline : item.headline}`)
-    .join('\n')
+function formatPageContent(page: XhsPage): string {
+  return [
+    `[${pageTypeLabel(page.type)}]`,
+    page.headline ? `标题：${page.headline}` : '',
+    page.subhead ? `副标题：${page.subhead}` : '',
+    page.bullets.length ? page.bullets.map((item) => `- ${item}`).join('\n') : '',
+    page.visualBrief ? `配图建议：${page.visualBrief}` : '',
+  ].filter(Boolean).join('\n')
+}
+
+function formatFullOutline(pages: XhsPage[]): string {
+  return pages.map(formatPageContent).join('\n\n<page>\n\n')
+}
+
+function buildDraftImagePrompt(project: XhsProject, page: XhsPage): string {
+  const nextPages = project.pages.map((item) => item.id === page.id ? page : item)
+  const pageText = formatPageContent(page)
+  const outline = formatFullOutline(nextPages)
 
   return [
-    '生成一张小红书风格的竖版图文图片。',
-    '画面比例 3:4，适合手机阅读。',
-    '不要生成平台 logo、水印、账号 ID、二维码或手机边框。',
-    '所有文字必须清晰、完整、正向排版，不能旋转或倒置。',
-    '文字应作为画面排版的一部分，不要只生成纯插画。',
+    '请生成一张小红书风格的图文内容图片。',
+    '【合规特别注意的】注意不要带有任何小红书的 logo，不要有右下角的用户 id 以及 logo。',
+    '【合规特别注意的】如果参考图片里有水印和 logo，请一定要去掉。',
     '',
-    `原始选题：${project.topic}`,
-    `页面类型：${page.type}`,
-    `内容领域：${project.config.field}`,
-    `视觉风格：${project.config.visualStyle}`,
-    '',
-    '当前页面内容：',
+    '页面内容：',
     pageText,
     '',
-    '整套图文结构：',
-    outline,
+    `页面类型：${pageTypeLabel(page.type)}`,
     '',
-    page.type === 'cover'
-      ? '封面要有强视觉焦点，主标题醒目，副标题在标题附近。'
-      : page.type === 'summary'
-        ? '总结页要有完成感，重点信息清晰，适合收藏。'
-        : '内容页要层级分明，重点短句突出，留白克制，适合连续滑读。',
     project.config.useCoverReference && page.index > 0
-      ? '参考输入图片的配色、字体层级和版式节奏，但不要复制其中的文字。'
-      : '整套页面要形成统一的配色、字体层级、装饰元素和留白节奏。',
+      ? '如果当前页面类型不是封面页的话，你要参考输入图片作为封面的样式。后续生成风格要严格参考封面的风格，保持风格统一。'
+      : '如果当前页面类型不是封面页，也要依据完整大纲和用户原始需求保持整套风格统一。',
+    '',
+    '设计要求：',
+    '',
+    '1. 整体风格',
+    '- 小红书爆款图文风格',
+    '- 清新、精致、有设计感',
+    '- 适合年轻人审美',
+    '- 配色和谐，视觉吸引力强',
+    `- 符合「${project.config.visualStyle}」视觉风格`,
+    '',
+    '2. 文字排版',
+    '- 文字清晰可读，字号适中',
+    '- 重要信息突出显示',
+    '- 排版美观，留白合理',
+    '- 支持 emoji 和符号',
+    '- 如果是封面，标题要大而醒目',
+    '- 所有文字内容必须完整呈现',
+    '',
+    '3. 视觉元素',
+    '- 背景简洁但不单调',
+    '- 可以有装饰性元素，如图标、插画',
+    '- 配色温暖或清新',
+    '- 保持专业感',
+    '',
+    '4. 页面类型特殊要求',
+    '[封面] 类型：标题占据主要位置，字号最大；副标题在标题下方；整体设计要有吸引力和冲击力；背景可以更丰富，有视觉焦点。',
+    '[内容] 类型：信息层次分明；列表项清晰展示；重点内容用颜色或粗体强调；可以有小图标辅助说明。',
+    '[总结] 类型：总结性文字突出；可以有勾选框或完成标志；给人完成感和满足感；有鼓励性的视觉元素。',
+    '',
+    '5. 技术规格',
+    '- 竖版 3:4 比例，小红书标准',
+    '- 高清画质',
+    '- 适合手机屏幕查看',
+    '- 正确竖屏观看排版，不能左右旋转或者倒置',
+    '- 不要有任何手机边框，或者白色留边',
+    '',
+    '6. 整体风格一致性',
+    '为确保所有页面风格统一，请参考完整的内容大纲和用户原始需求来确定：',
+    '- 整体色调和配色方案',
+    '- 设计风格',
+    '- 视觉元素的一致性',
+    '- 排版布局的统一风格',
+    '',
+    '用户原始需求：',
+    project.topic,
+    '',
+    `内容领域：${project.config.field}`,
+    `目标读者：${project.config.audience || '泛小红书用户'}`,
+    '',
+    '完整内容大纲参考：',
+    '---',
+    outline,
+    '---',
+    '',
+    '请根据以上要求，生成一张精美的小红书风格图片。请直接给出图片。',
   ].join('\n')
 }
 
