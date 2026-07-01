@@ -38,6 +38,8 @@ const XHS_IMAGE_QUALITY = 'medium'
 const XHS_IMAGE_FORMAT = 'png'
 const XHS_DEFAULT_TOPIC = '给自由职业者做一套高效工作流图文'
 const TAOBAO_DEFAULT_TOPIC = '便携式咖啡杯，主打不漏水、通勤好看、送礼体面'
+const XHS_DEFAULT_AUDIENCE = '想提升内容质感的新手创作者'
+const TAOBAO_DEFAULT_AUDIENCE = '有明确购买需求的淘宝用户'
 const emptyEnvConfig: EnvConfig = {
   openaiApiKey: '',
   openaiBaseUrl: 'https://api.openai.com/v1',
@@ -49,7 +51,7 @@ const emptyEnvConfig: EnvConfig = {
 const defaultConfig: StudioConfig = {
   mode: 'xhs',
   field: '生活方式',
-  audience: '想提升内容质感的新手创作者',
+  audience: XHS_DEFAULT_AUDIENCE,
   visualStyle: '清爽实用',
   pageCount: 8,
   size: XHS_IMAGE_SIZE,
@@ -138,10 +140,14 @@ function modeDefaults(mode: ProjectMode, current: StudioConfig): StudioConfig {
     ...current,
     mode,
     pageCount: bounds.defaultValue,
-    audience: mode === 'taobao' ? '有明确购买需求的淘宝用户' : '想提升内容质感的新手创作者',
+    audience: mode === 'taobao' ? TAOBAO_DEFAULT_AUDIENCE : XHS_DEFAULT_AUDIENCE,
     visualStyle: mode === 'taobao' ? '杂志质感' : '清爽实用',
     useCoverReference: true,
   })
+}
+
+function defaultAudience(mode: ProjectMode): string {
+  return mode === 'taobao' ? TAOBAO_DEFAULT_AUDIENCE : XHS_DEFAULT_AUDIENCE
 }
 
 function createModeWorkspace(mode: ProjectMode): ModeWorkspace {
@@ -161,6 +167,11 @@ function createModeWorkspace(mode: ProjectMode): ModeWorkspace {
 
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError'
+}
+
+function isDefaultPositioning(value: StudioConfig): boolean {
+  const configMode = value.mode ?? 'xhs'
+  return value.audience.trim() === defaultAudience(configMode)
 }
 
 function readImageFile(file: File): Promise<string> {
@@ -852,7 +863,7 @@ export default function App() {
       setError('请输入选题')
       return
     }
-    if (!settingsReady) {
+    if (!settingsReady || isDefaultPositioning(config)) {
       setError('')
       setSettingsPromptAction(action)
       return
@@ -1235,7 +1246,7 @@ export default function App() {
 
           {settingsPromptAction && (
             <div className="settings-reminder" role="alert">
-              <p>还没有自动填写{settingsLabel()}。建议先自动填写，再生成。</p>
+              <p>当前还是默认{settingsLabel()}。建议先自动填写，再生成。</p>
               <div>
                 <button type="button" onClick={() => void autoFillAndContinue()} disabled={Boolean(busy)}>
                   {busy === 'settings' ? <Loader2 className="spin" size={16} /> : <WandSparkles size={16} />}
