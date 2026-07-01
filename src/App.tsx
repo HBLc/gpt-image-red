@@ -10,6 +10,8 @@ import {
   History,
   Image as ImageIcon,
   Loader2,
+  Maximize2,
+  Minimize2,
   RefreshCw,
   Save,
   Settings,
@@ -343,6 +345,8 @@ export default function App() {
   const [pageStatus, setPageStatus] = useState<Record<string, PageStatus>>({})
   const [pageErrors, setPageErrors] = useState<Record<string, string>>({})
   const [selectedPageId, setSelectedPageId] = useState<string>('')
+  const [previewPageId, setPreviewPageId] = useState<string>('')
+  const [isPreviewActualSize, setIsPreviewActualSize] = useState(false)
   const [pageDraft, setPageDraft] = useState<PageDraft | null>(null)
   const [health, setHealth] = useState<HealthResponse | null>(null)
   const [history, setHistory] = useState<SavedProject[]>([])
@@ -393,9 +397,32 @@ export default function App() {
     return project?.pages.find((page) => page.id === selectedPageId) ?? project?.pages[0] ?? null
   }, [project, selectedPageId])
 
+  const previewPage = useMemo(() => {
+    return project?.pages.find((page) => page.id === previewPageId) ?? null
+  }, [project, previewPageId])
+
   useEffect(() => {
     setPageDraft(selectedPage ? pageToDraft(selectedPage) : null)
   }, [selectedPage?.id])
+
+  useEffect(() => {
+    if (!previewPageId) return undefined
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closePreview()
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [previewPageId])
+
+  function openPreview(pageId: string) {
+    setPreviewPageId(pageId)
+    setIsPreviewActualSize(false)
+  }
+
+  function closePreview() {
+    setPreviewPageId('')
+    setIsPreviewActualSize(false)
+  }
 
   const generatedCount = useMemo(() => Object.values(images).filter(Boolean).length, [images])
   const mode = config.mode ?? 'xhs'
@@ -449,6 +476,8 @@ export default function App() {
     setPageStatus({})
     setPageErrors({})
     setSelectedPageId('')
+    setPreviewPageId('')
+    setIsPreviewActualSize(false)
     setPageDraft(null)
     if (nextMode === 'taobao' && topic === XHS_DEFAULT_TOPIC) setTopic(TAOBAO_DEFAULT_TOPIC)
     if (nextMode === 'xhs' && topic === TAOBAO_DEFAULT_TOPIC) setTopic(XHS_DEFAULT_TOPIC)
@@ -496,6 +525,8 @@ export default function App() {
       setPageStatus(Object.fromEntries(response.project.pages.map((page) => [page.id, 'idle'])))
       setPageErrors({})
       setSelectedPageId(response.project.pages[0]?.id ?? '')
+      setPreviewPageId('')
+      setIsPreviewActualSize(false)
       return response.project
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -578,6 +609,8 @@ export default function App() {
     setPageStatus(Object.fromEntries(item.pages.map((page) => [page.id, item.images?.[page.id] ? 'done' : 'idle'])))
     setPageErrors({})
     setSelectedPageId(item.pages[0]?.id ?? '')
+    setPreviewPageId('')
+    setIsPreviewActualSize(false)
     clearReferenceImage()
   }
 
@@ -766,6 +799,35 @@ export default function App() {
         </div>
       )}
 
+      {previewPage && images[previewPage.id] && (
+        <div className="image-lightbox" role="dialog" aria-modal="true" aria-label="图片预览" onMouseDown={closePreview}>
+          <section className="lightbox-panel" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="lightbox-header">
+              <div>
+                <p className="eyebrow">{pageTypeLabel(previewPage.type, project?.config.mode ?? 'xhs')} / {previewPage.index + 1}</p>
+                <h2>{previewPage.headline}</h2>
+              </div>
+              <div className="lightbox-actions">
+                <button type="button" aria-pressed={isPreviewActualSize} onClick={() => setIsPreviewActualSize((value) => !value)}>
+                  {isPreviewActualSize ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+                  {isPreviewActualSize ? '适应窗口' : '原图尺寸'}
+                </button>
+                <button type="button" onClick={() => downloadDataUrl(images[previewPage.id], `${previewPage.index + 1}-${previewPage.type}.${config.outputFormat}`)}>
+                  <Download size={18} />
+                  下载
+                </button>
+                <button className="icon-button" type="button" onClick={closePreview} aria-label="关闭大图">
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+            <div className={classNames('lightbox-image-wrap', isPreviewActualSize && 'actual-size')}>
+              <img src={images[previewPage.id]} alt={previewPage.headline} />
+            </div>
+          </section>
+        </div>
+      )}
+
       <main className="workspace">
         <section className="panel composer" aria-label="生成设置">
           <div className="panel-title">
@@ -917,10 +979,19 @@ export default function App() {
                       className={classNames('page-tile', selectedPageId === page.id && 'active')}
                       type="button"
                       key={page.id}
-                      onClick={() => setSelectedPageId(page.id)}
+                      onClick={(event) => {
+                        setSelectedPageId(page.id)
+                        if (image && (event.target as HTMLElement).closest('.page-image')) openPreview(page.id)
+                      }}
+                      aria-label={`${page.headline}${image ? '，点击图片查看大图' : ''}`}
                     >
                       <div className={classNames('page-image', project.config.mode === 'taobao' && 'square')}>
-                        {image ? <img src={image} alt={page.headline} /> : <span>{page.index + 1}</span>}
+                        {image ? (
+                          <>
+                            <img src={image} alt={page.headline} />
+                            <span className="zoom-affordance"><Maximize2 size={17} /></span>
+                          </>
+                        ) : <span>{page.index + 1}</span>}
                       </div>
                       <div className="page-meta">
                         <StatusIcon status={status} />
