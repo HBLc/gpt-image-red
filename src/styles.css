@@ -768,6 +768,7 @@ button:disabled {
 }
 
 .lightbox-panel {
+  position: relative;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 12px;
@@ -810,6 +811,40 @@ button:disabled {
   color: var(--ink);
   padding: 9px 10px;
   font-weight: 800;
+}
+
+.lightbox-nav {
+  position: absolute;
+  top: 54%;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 64px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 8px;
+  background: rgba(33, 25, 23, 0.7);
+  color: #fff;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.24);
+  transform: translateY(-50%);
+  transition: background 160ms ease, transform 160ms ease;
+}
+
+.lightbox-nav:hover,
+.lightbox-nav:focus-visible {
+  background: rgba(33, 25, 23, 0.86);
+}
+
+.lightbox-nav:active {
+  transform: translateY(-50%) scale(0.98);
+}
+
+.lightbox-nav.previous {
+  left: 22px;
+}
+
+.lightbox-nav.next {
+  right: 22px;
 }
 
 .lightbox-image-wrap {
@@ -1061,14 +1096,36 @@ button:disabled {
 
   .lightbox-actions {
     width: 100%;
+    flex-wrap: wrap;
   }
 
-  .lightbox-actions button:first-child {
+  .lightbox-actions button:not(.icon-button) {
     flex: 1;
+    min-width: 112px;
   }
 
   .lightbox-image-wrap img {
     max-height: calc(100dvh - 190px);
+  }
+
+  .lightbox-nav {
+    top: auto;
+    bottom: 20px;
+    width: 46px;
+    height: 56px;
+    transform: none;
+  }
+
+  .lightbox-nav:active {
+    transform: scale(0.98);
+  }
+
+  .lightbox-nav.previous {
+    left: 18px;
+  }
+
+  .lightbox-nav.next {
+    right: 18px;
   }
 }
 

@@ -3,6 +3,8 @@ import {
   AlertCircle,
   Archive,
   Check,
+  ChevronLeft,
+  ChevronRight,
   Copy,
   Download,
   Eye,
@@ -401,6 +403,16 @@ export default function App() {
     return project?.pages.find((page) => page.id === previewPageId) ?? null
   }, [project, previewPageId])
 
+  const previewablePages = useMemo(() => {
+    return project?.pages.filter((page) => Boolean(images[page.id])) ?? []
+  }, [images, project])
+
+  const previewPosition = useMemo(() => {
+    return previewablePages.findIndex((page) => page.id === previewPageId)
+  }, [previewPageId, previewablePages])
+
+  const canNavigatePreview = previewablePages.length > 1
+
   useEffect(() => {
     setPageDraft(selectedPage ? pageToDraft(selectedPage) : null)
   }, [selectedPage?.id])
@@ -409,10 +421,18 @@ export default function App() {
     if (!previewPageId) return undefined
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') closePreview()
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault()
+        navigatePreview(-1)
+      }
+      if (event.key === 'ArrowRight') {
+        event.preventDefault()
+        navigatePreview(1)
+      }
     }
     window.addEventListener('keydown', closeOnEscape)
     return () => window.removeEventListener('keydown', closeOnEscape)
-  }, [previewPageId])
+  }, [previewPageId, previewablePages])
 
   function openPreview(pageId: string) {
     setPreviewPageId(pageId)
@@ -421,6 +441,16 @@ export default function App() {
 
   function closePreview() {
     setPreviewPageId('')
+    setIsPreviewActualSize(false)
+  }
+
+  function navigatePreview(direction: -1 | 1) {
+    if (previewablePages.length <= 1) return
+    const currentIndex = previewablePages.findIndex((page) => page.id === previewPageId)
+    const nextIndex = ((currentIndex >= 0 ? currentIndex : 0) + direction + previewablePages.length) % previewablePages.length
+    const nextPage = previewablePages[nextIndex]
+    setPreviewPageId(nextPage.id)
+    setSelectedPageId(nextPage.id)
     setIsPreviewActualSize(false)
   }
 
@@ -804,7 +834,10 @@ export default function App() {
           <section className="lightbox-panel" onMouseDown={(event) => event.stopPropagation()}>
             <div className="lightbox-header">
               <div>
-                <p className="eyebrow">{pageTypeLabel(previewPage.type, project?.config.mode ?? 'xhs')} / {previewPage.index + 1}</p>
+                <p className="eyebrow">
+                  {pageTypeLabel(previewPage.type, project?.config.mode ?? 'xhs')} / {previewPage.index + 1}
+                  {previewPosition >= 0 && ` / ${previewPosition + 1}/${previewablePages.length}`}
+                </p>
                 <h2>{previewPage.headline}</h2>
               </div>
               <div className="lightbox-actions">
@@ -821,6 +854,16 @@ export default function App() {
                 </button>
               </div>
             </div>
+            {canNavigatePreview && (
+              <>
+                <button className="lightbox-nav previous" type="button" onClick={() => navigatePreview(-1)} aria-label="上一张图片">
+                  <ChevronLeft size={28} />
+                </button>
+                <button className="lightbox-nav next" type="button" onClick={() => navigatePreview(1)} aria-label="下一张图片">
+                  <ChevronRight size={28} />
+                </button>
+              </>
+            )}
             <div className={classNames('lightbox-image-wrap', isPreviewActualSize && 'actual-size')}>
               <img src={images[previewPage.id]} alt={previewPage.headline} />
             </div>
