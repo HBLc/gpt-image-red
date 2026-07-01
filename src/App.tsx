@@ -419,7 +419,10 @@ export default function App() {
   useEffect(() => {
     void refreshHealth()
     void loadEnvConfig()
-    void loadHistory().then(setHistory)
+    void loadHistory().then((items) => {
+      setHistory(items)
+      if (items[0]) loadSaved(items[0])
+    })
   }, [])
 
   async function refreshHealth() {
@@ -723,6 +726,16 @@ export default function App() {
     })
   }
 
+  async function persistProjectSnapshot(targetProject: XhsProject): Promise<void> {
+    const cleanProject = {
+      ...targetProject,
+      config: normalizeConfig(targetProject.config),
+    }
+    const operationMode = cleanProject.config.mode
+    const saved = await rememberProject(toSavedProject(cleanProject, workspaceRef.current[operationMode].images))
+    setHistory(saved)
+  }
+
   async function composeCurrentProject(signal: AbortSignal, operationMode = mode): Promise<XhsProject | null> {
     const workspace = workspaceRef.current[operationMode]
     const cleanTopic = workspace.topic.trim()
@@ -750,6 +763,7 @@ export default function App() {
         setPreviewPageId('')
         setIsPreviewActualSize(false)
       }
+      await persistProjectSnapshot(response.project)
       return response.project
     } catch (err) {
       if (!signal.aborted && !isAbortError(err) && activeModeRef.current === operationMode) {
@@ -782,6 +796,7 @@ export default function App() {
       if (signal?.aborted) return null
       setImagesForMode(operationMode, (current) => ({ ...current, [page.id]: response.image }))
       setPageStatusForMode(operationMode, (current) => ({ ...current, [page.id]: 'done' }))
+      await persistProjectSnapshot(cleanProject)
       return response.image
     } catch (err) {
       if (signal?.aborted || isAbortError(err)) {
@@ -830,9 +845,7 @@ export default function App() {
       }
 
       if (signal?.aborted) return
-      const merged = workspaceRef.current[operationMode].images
-      const saved = await rememberProject(toSavedProject(cleanProject, merged))
-      setHistory(saved)
+      await persistProjectSnapshot(cleanProject)
     } finally {
       if (controller) finishGeneration(controller)
     }
@@ -956,6 +969,12 @@ export default function App() {
     }
 
     return { project: nextProject, page: updatedPage }
+  }
+
+  async function saveSelectedDraftToHistory() {
+    const saved = saveSelectedDraft()
+    if (!saved) return
+    await persistProjectSnapshot(saved.project)
   }
 
   async function generateSelectedPage() {
@@ -1375,7 +1394,7 @@ export default function App() {
                     {pageErrors[selectedPage.id] && <div className="error-box">{pageErrors[selectedPage.id]}</div>}
                   </div>
                   <div className="detail-actions">
-                    <button type="button" onClick={() => saveSelectedDraft()}>
+                    <button type="button" onClick={() => void saveSelectedDraftToHistory()}>
                       <Save size={17} />
                       保存
                     </button>
