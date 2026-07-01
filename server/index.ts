@@ -4,7 +4,7 @@ import express from 'express'
 import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import OpenAI from 'openai'
-import type { ComposeRequest, EnvConfigResponse, Field, GenerateImageRequest, HealthResponse, SaveEnvConfigRequest, SuggestSettingsRequest, SuggestSettingsResponse, VisualStyle, XhsPage, XhsProject } from '../src/types'
+import type { ComposeRequest, EnvConfigResponse, Field, GenerateImageRequest, HealthResponse, ProjectMode, SaveEnvConfigRequest, SuggestSettingsRequest, SuggestSettingsResponse, VisualStyle, XhsPage, XhsProject } from '../src/types'
 import { createMockImage, createMockProject } from './mock'
 import { buildContentPrompt, buildImagePrompt, buildSettingsPrompt } from './prompts'
 
@@ -210,8 +210,13 @@ function normalizeSettings(raw: unknown, topic: string): SuggestSettingsResponse
   }
 }
 
-function clampPageCount(value: number): number {
-  return Math.min(10, Math.max(3, value))
+function getMode(config: ComposeRequest['config']): ProjectMode {
+  return config.mode ?? 'xhs'
+}
+
+function clampPageCount(value: number, mode: ProjectMode): number {
+  const max = mode === 'taobao' ? 8 : 10
+  return Math.min(max, Math.max(3, value))
 }
 
 function normalizePage(raw: unknown, index: number): XhsPage {
@@ -242,7 +247,7 @@ function normalizeProject(raw: unknown, request: ComposeRequest): XhsProject {
     return createMockProject(request)
   }
 
-  pages = pages.slice(0, clampPageCount(request.config.pageCount))
+  pages = pages.slice(0, clampPageCount(request.config.pageCount, getMode(request.config)))
   pages[0] = { ...pages[0], type: 'cover' }
   pages[pages.length - 1] = { ...pages[pages.length - 1], type: 'summary' }
   pages = pages.map((item, index) => ({ ...item, index, id: `page-${index}-${Date.now()}` }))
@@ -255,7 +260,10 @@ function normalizeProject(raw: unknown, request: ComposeRequest): XhsProject {
     tags: asStringArray(data.tags).slice(0, 10),
     pages: [],
     createdAt: new Date().toISOString(),
-    config: request.config,
+    config: {
+      ...request.config,
+      mode: getMode(request.config),
+    },
   }
 
   project.pages = pages.map((item) => ({
@@ -264,9 +272,9 @@ function normalizeProject(raw: unknown, request: ComposeRequest): XhsProject {
       topic: project.topic,
       page: item,
       pageType: item.type,
-      config: request.config,
+      config: project.config,
       fullPageList: pages,
-      hasReference: request.config.useCoverReference && item.index > 0,
+      hasReference: getMode(project.config) === 'taobao' || project.config.useCoverReference && item.index > 0,
     }),
   }))
 
@@ -470,7 +478,7 @@ app.post('/api/suggest-settings', async (req, res, next) => {
         },
         {
           role: 'user',
-          content: buildSettingsPrompt(topic),
+          content: buildSettingsPrompt(topic, request.mode ?? 'xhs'),
         },
       ],
     } as never)

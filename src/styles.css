@@ -265,6 +265,34 @@ textarea:focus-visible {
   margin-bottom: 16px;
 }
 
+.mode-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.mode-switch button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  background: var(--surface-strong);
+  color: var(--muted);
+  padding: 10px 8px;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.mode-switch button.active {
+  border-color: rgba(201, 56, 43, 0.34);
+  background: #fff1eb;
+  color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(201, 56, 43, 0.08);
+}
+
 .field-block {
   display: grid;
   gap: 7px;
@@ -417,6 +445,78 @@ button:disabled {
   margin-bottom: 14px;
 }
 
+.reference-upload {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.upload-drop {
+  position: relative;
+  display: grid;
+  place-items: center;
+  gap: 7px;
+  min-height: 132px;
+  border: 1px dashed rgba(111, 98, 92, 0.38);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.52);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 900;
+  text-align: center;
+}
+
+.upload-drop input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.reference-preview {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  padding: 8px;
+}
+
+.reference-preview img {
+  display: block;
+  width: 84px;
+  aspect-ratio: 1 / 1;
+  border-radius: 6px;
+  object-fit: cover;
+  background: #efe3d6;
+}
+
+.reference-preview strong,
+.reference-preview span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reference-preview strong {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.reference-preview span {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .setting-summary {
   display: grid;
   gap: 8px;
@@ -529,6 +629,10 @@ button:disabled {
   color: rgba(33, 25, 23, 0.34);
   font-size: 36px;
   font-weight: 900;
+}
+
+.page-image.square {
+  aspect-ratio: 1 / 1;
 }
 
 .page-image img {

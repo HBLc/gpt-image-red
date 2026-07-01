@@ -13,21 +13,26 @@ import {
   RefreshCw,
   Save,
   Settings,
+  ShoppingBag,
   Sparkles,
   Trash2,
+  UploadCloud,
   WandSparkles,
   X,
 } from 'lucide-react'
 import { composeProject, generateImage, getEnvConfig, getHealth, saveEnvConfig, suggestSettings } from './api'
 import { exportProjectZip, toSavedProject } from './exportProject'
 import { clearHistory, loadHistory, rememberProject, saveHistory } from './storage'
-import type { EnvConfig, Field, HealthResponse, SavedProject, StudioConfig, VisualStyle, XhsPage, XhsProject } from './types'
+import type { EnvConfig, Field, HealthResponse, ProjectMode, SavedProject, StudioConfig, VisualStyle, XhsPage, XhsProject } from './types'
 
 const fields: Field[] = ['生活方式', '美妆护肤', '职场效率', '学习成长', '旅行探店', '美食烘焙', '运动健康', '母婴家庭', '家居收纳', '数码工具']
 const styles: VisualStyle[] = ['清爽实用', '杂志质感', '手账拼贴', '专业干货', '温暖日常', '科技极简']
 const XHS_IMAGE_SIZE = '1200x1600'
+const TAOBAO_IMAGE_SIZE = '1024x1024'
 const XHS_IMAGE_QUALITY = 'medium'
 const XHS_IMAGE_FORMAT = 'png'
+const XHS_DEFAULT_TOPIC = '给自由职业者做一套高效工作流图文'
+const TAOBAO_DEFAULT_TOPIC = '便携式咖啡杯，主打不漏水、通勤好看、送礼体面'
 const emptyEnvConfig: EnvConfig = {
   openaiApiKey: '',
   openaiBaseUrl: 'https://api.openai.com/v1',
@@ -37,6 +42,7 @@ const emptyEnvConfig: EnvConfig = {
 }
 
 const defaultConfig: StudioConfig = {
+  mode: 'xhs',
   field: '生活方式',
   audience: '想提升内容质感的新手创作者',
   visualStyle: '清爽实用',
@@ -83,19 +89,49 @@ function copyText(value: string) {
   void navigator.clipboard.writeText(value)
 }
 
-function clampPageCount(value: number): number {
-  return Math.min(10, Math.max(3, value))
+function pageBounds(mode: ProjectMode): { min: number; max: number; defaultValue: number } {
+  return mode === 'taobao'
+    ? { min: 3, max: 8, defaultValue: 5 }
+    : { min: 3, max: 10, defaultValue: 8 }
+}
+
+function clampPageCount(value: number, mode: ProjectMode): number {
+  const bounds = pageBounds(mode)
+  return Math.min(bounds.max, Math.max(bounds.min, value))
 }
 
 function normalizeConfig(value: StudioConfig): StudioConfig {
+  const mode = value.mode ?? 'xhs'
   return {
     ...value,
-    pageCount: clampPageCount(value.pageCount),
-    size: XHS_IMAGE_SIZE,
+    mode,
+    pageCount: clampPageCount(value.pageCount, mode),
+    size: mode === 'taobao' ? TAOBAO_IMAGE_SIZE : XHS_IMAGE_SIZE,
     quality: XHS_IMAGE_QUALITY,
     outputFormat: XHS_IMAGE_FORMAT,
     moderation: 'auto',
   }
+}
+
+function modeDefaults(mode: ProjectMode, current: StudioConfig): StudioConfig {
+  const bounds = pageBounds(mode)
+  return normalizeConfig({
+    ...current,
+    mode,
+    pageCount: bounds.defaultValue,
+    audience: mode === 'taobao' ? '有明确购买需求的淘宝用户' : '想提升内容质感的新手创作者',
+    visualStyle: mode === 'taobao' ? '杂志质感' : '清爽实用',
+    useCoverReference: true,
+  })
+}
+
+function readImageFile(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(new Error('参考图读取失败'))
+    reader.readAsDataURL(file)
+  })
 }
 
 function pageToDraft(page: XhsPage): PageDraft {
@@ -130,30 +166,96 @@ function textareaRows(value: string, minRows: number): number {
   return Math.max(minRows, rows)
 }
 
-function pageTypeLabel(type: XhsPage['type']): string {
+function pageTypeLabel(type: XhsPage['type'], mode: ProjectMode): string {
+  if (mode === 'taobao') {
+    if (type === 'cover') return '主图'
+    if (type === 'summary') return '收口'
+    return '卖点'
+  }
   if (type === 'cover') return '封面'
   if (type === 'summary') return '总结'
   return '内容'
 }
 
-function formatPageContent(page: XhsPage): string {
+function formatPageContent(page: XhsPage, mode: ProjectMode): string {
   return [
-    `[${pageTypeLabel(page.type)}]`,
+    `[${pageTypeLabel(page.type, mode)}]`,
     page.headline ? `标题：${page.headline}` : '',
     page.subhead ? `副标题：${page.subhead}` : '',
     page.bullets.length ? page.bullets.map((item) => `- ${item}`).join('\n') : '',
-    page.visualBrief ? `配图建议：${page.visualBrief}` : '',
+    page.visualBrief ? `${mode === 'taobao' ? '画面建议' : '配图建议'}：${page.visualBrief}` : '',
   ].filter(Boolean).join('\n')
 }
 
-function formatFullOutline(pages: XhsPage[]): string {
-  return pages.map(formatPageContent).join('\n\n<page>\n\n')
+function formatFullOutline(pages: XhsPage[], mode: ProjectMode): string {
+  return pages.map((page) => formatPageContent(page, mode)).join('\n\n<page>\n\n')
 }
 
 function buildDraftImagePrompt(project: XhsProject, page: XhsPage): string {
+  const mode = project.config.mode ?? 'xhs'
   const nextPages = project.pages.map((item) => item.id === page.id ? page : item)
-  const pageText = formatPageContent(page)
-  const outline = formatFullOutline(nextPages)
+  const pageText = formatPageContent(page, mode)
+  const outline = formatFullOutline(nextPages, mode)
+
+  if (mode === 'taobao') {
+    return [
+      '请生成一张淘宝电商风格的商品宣传图。',
+      '【合规特别注意】不要带有淘宝 logo、平台水印、二维码、店铺 ID 或手机边框。',
+      '【合规特别注意】如果参考图片里有水印、logo、人物隐私信息，请去掉。',
+      '',
+      '当前图片内容：',
+      pageText,
+      '',
+      `图片类型：${pageTypeLabel(page.type, mode)}`,
+      '',
+      '如果上传了参考图，必须保持商品外观、材质、颜色、比例和关键结构一致，只优化背景、灯光、构图和促销排版。没有参考图时，根据用户原始需求生成合理商品主体，避免编造品牌标识。',
+      '',
+      '设计要求：',
+      '',
+      '1. 整体风格',
+      '- 淘宝/天猫商品宣传图质感',
+      '- 商品主体清楚，第一眼知道卖什么',
+      '- 画面干净，有明确转化焦点',
+      '- 配色和谐，符合商品品类',
+      `- 符合「${project.config.visualStyle}」视觉风格`,
+      '',
+      '2. 文案排版',
+      '- 文字清晰可读，核心卖点最大',
+      '- 卖点短句不超过三层层级',
+      '- 促销信息要像电商活动页，不要像社交笔记',
+      '- 所有文字必须完整呈现，不能旋转或倒置',
+      '',
+      '3. 视觉元素',
+      '- 商品占画面主要位置',
+      '- 可以加入卖点标签、价格位占位、优惠角标或质感背景',
+      '- 背景不能抢商品主体',
+      '- 不生成平台 UI、聊天截图、订单页或手机壳画面',
+      '',
+      '4. 图片类型特殊要求',
+      '[主图] 类型：商品最大、利益点最直接，适合商品列表和详情页首屏。',
+      '[卖点] 类型：突出一个功能、材质、场景或对比，信息层级清楚。',
+      '[收口] 类型：总结购买理由、活动利益或套装信息，形成下单动机。',
+      '',
+      '5. 技术规格',
+      '- 方图 1:1 比例，适合淘宝主图和商品宣传图',
+      '- 高清画质',
+      '- 不要白色留边',
+      '- 不要生成真实品牌商标，除非用户输入里明确提供',
+      '',
+      '商品或活动原始需求：',
+      project.topic,
+      '',
+      `商品领域：${project.config.field}`,
+      `目标买家：${project.config.audience || '淘宝潜在买家'}`,
+      '',
+      '完整宣传图结构参考：',
+      '---',
+      outline,
+      '---',
+      '',
+      '请根据以上要求，生成一张可直接用于淘宝商品宣传的图片。请直接给出图片。',
+    ].join('\n')
+  }
 
   return [
     '请生成一张小红书风格的图文内容图片。',
@@ -163,7 +265,7 @@ function buildDraftImagePrompt(project: XhsProject, page: XhsPage): string {
     '页面内容：',
     pageText,
     '',
-    `页面类型：${pageTypeLabel(page.type)}`,
+    `页面类型：${pageTypeLabel(page.type, mode)}`,
     '',
     project.config.useCoverReference && page.index > 0
       ? '如果当前页面类型不是封面页的话，你要参考输入图片作为封面的样式。后续生成风格要严格参考封面的风格，保持风格统一。'
@@ -234,7 +336,7 @@ function StatusIcon({ status }: { status: PageStatus }) {
 }
 
 export default function App() {
-  const [topic, setTopic] = useState('给自由职业者做一套高效工作流图文')
+  const [topic, setTopic] = useState(XHS_DEFAULT_TOPIC)
   const [config, setConfig] = useState<StudioConfig>(defaultConfig)
   const [project, setProject] = useState<XhsProject | null>(null)
   const [images, setImages] = useState<Record<string, string>>({})
@@ -252,6 +354,8 @@ export default function App() {
   const [envBusy, setEnvBusy] = useState(false)
   const [envError, setEnvError] = useState('')
   const [envMessage, setEnvMessage] = useState('')
+  const [referenceImage, setReferenceImage] = useState('')
+  const [referenceImageName, setReferenceImageName] = useState('')
 
   useEffect(() => {
     void refreshHealth()
@@ -294,6 +398,8 @@ export default function App() {
   }, [selectedPage?.id])
 
   const generatedCount = useMemo(() => Object.values(images).filter(Boolean).length, [images])
+  const mode = config.mode ?? 'xhs'
+  const bounds = pageBounds(mode)
 
   async function fillSettings() {
     const cleanTopic = topic.trim()
@@ -305,7 +411,7 @@ export default function App() {
     setBusy('settings')
     setError('')
     try {
-      const next = await suggestSettings({ topic: cleanTopic })
+      const next = await suggestSettings({ topic: cleanTopic, mode })
       setConfig((current) => normalizeConfig({
         ...current,
         field: fields.includes(next.field) ? next.field : current.field,
@@ -333,6 +439,43 @@ export default function App() {
     } finally {
       setEnvBusy(false)
     }
+  }
+
+  function switchMode(nextMode: ProjectMode) {
+    if (nextMode === mode) return
+    setConfig((current) => modeDefaults(nextMode, current))
+    setProject(null)
+    setImages({})
+    setPageStatus({})
+    setPageErrors({})
+    setSelectedPageId('')
+    setPageDraft(null)
+    if (nextMode === 'taobao' && topic === XHS_DEFAULT_TOPIC) setTopic(TAOBAO_DEFAULT_TOPIC)
+    if (nextMode === 'xhs' && topic === TAOBAO_DEFAULT_TOPIC) setTopic(XHS_DEFAULT_TOPIC)
+  }
+
+  async function uploadReferenceImage(file: File | undefined) {
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      setError('请上传图片文件')
+      return
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      setError('参考图不能超过 8MB')
+      return
+    }
+    setError('')
+    try {
+      setReferenceImage(await readImageFile(file))
+      setReferenceImageName(file.name)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  function clearReferenceImage() {
+    setReferenceImage('')
+    setReferenceImageName('')
   }
 
   async function createProject(): Promise<XhsProject | null> {
@@ -390,12 +533,13 @@ export default function App() {
       ...targetProject,
       config: normalizeConfig(targetProject.config),
     }
+    const productReference = cleanProject.config.mode === 'taobao' ? referenceImage : ''
     const nextImages: Record<string, string> = {}
     try {
       const cover = cleanProject.pages[0]
       let coverImage = ''
       if (cover) {
-        const result = await generatePageImage(cleanProject, cover)
+        const result = await generatePageImage(cleanProject, cover, productReference || undefined)
         if (result) {
           coverImage = result
           nextImages[cover.id] = result
@@ -403,7 +547,9 @@ export default function App() {
       }
 
       for (const page of cleanProject.pages.slice(1)) {
-        const reference = cleanProject.config.useCoverReference ? coverImage : undefined
+        const reference = cleanProject.config.mode === 'taobao'
+          ? productReference || (cleanProject.config.useCoverReference ? coverImage : undefined)
+          : cleanProject.config.useCoverReference ? coverImage : undefined
         const result = await generatePageImage(cleanProject, page, reference)
         if (result) nextImages[page.id] = result
       }
@@ -432,6 +578,7 @@ export default function App() {
     setPageStatus(Object.fromEntries(item.pages.map((page) => [page.id, item.images?.[page.id] ? 'done' : 'idle'])))
     setPageErrors({})
     setSelectedPageId(item.pages[0]?.id ?? '')
+    clearReferenceImage()
   }
 
   function deleteSaved(id: string) {
@@ -493,9 +640,11 @@ export default function App() {
     const saved = saveSelectedDraft({ clearImage: false })
     if (!saved) return
     const cover = saved.project.pages[0]
-    const reference = saved.project.config.useCoverReference && saved.page.index > 0 && cover
-      ? images[cover.id]
-      : undefined
+    const reference = saved.project.config.mode === 'taobao'
+      ? referenceImage || (saved.project.config.useCoverReference && saved.page.index > 0 && cover ? images[cover.id] : undefined)
+      : saved.project.config.useCoverReference && saved.page.index > 0 && cover
+        ? images[cover.id]
+        : undefined
     setBusy('page')
     try {
       await generatePageImage(saved.project, saved.page, reference)
@@ -518,7 +667,7 @@ export default function App() {
           </div>
           <div>
             <h1>Red Image Studio</h1>
-            <p>小红书图文工作台</p>
+            <p>小红书 / 淘宝图片工作台</p>
           </div>
         </div>
         <div className="topbar-actions">
@@ -624,15 +773,70 @@ export default function App() {
             <h2>生成</h2>
           </div>
 
+          <div className="mode-switch" aria-label="生成类型">
+            <button
+              className={classNames(mode === 'xhs' && 'active')}
+              type="button"
+              onClick={() => switchMode('xhs')}
+            >
+              <Sparkles size={18} />
+              小红书图文
+            </button>
+            <button
+              className={classNames(mode === 'taobao' && 'active')}
+              type="button"
+              onClick={() => switchMode('taobao')}
+            >
+              <ShoppingBag size={18} />
+              淘宝宣传图
+            </button>
+          </div>
+
           <label className="field-block">
-            <span>选题</span>
-            <textarea value={topic} onChange={(event) => setTopic(event.target.value)} rows={5} />
+            <span>{mode === 'taobao' ? '商品/活动' : '选题'}</span>
+            <textarea
+              value={topic}
+              onChange={(event) => setTopic(event.target.value)}
+              rows={5}
+              placeholder={mode === 'taobao' ? TAOBAO_DEFAULT_TOPIC : XHS_DEFAULT_TOPIC}
+            />
           </label>
+
+          {mode === 'taobao' && (
+            <div className="reference-upload">
+              <div className="mini-heading">
+                <span>参考图</span>
+                {referenceImage && <button type="button" onClick={clearReferenceImage}><X size={15} />移除</button>}
+              </div>
+              {referenceImage ? (
+                <div className="reference-preview">
+                  <img src={referenceImage} alt="淘宝商品参考图" />
+                  <div>
+                    <strong>{referenceImageName || '已上传参考图'}</strong>
+                    <span>生成时保留商品外观、材质和颜色</span>
+                  </div>
+                </div>
+              ) : (
+                <label className="upload-drop">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(event) => {
+                      void uploadReferenceImage(event.target.files?.[0])
+                      event.currentTarget.value = ''
+                    }}
+                  />
+                  <UploadCloud size={22} />
+                  <span>上传商品参考图</span>
+                </label>
+              )}
+            </div>
+          )}
 
           <div className="auto-settings">
             <button className="secondary-button full" type="button" onClick={fillSettings} disabled={Boolean(busy)}>
               {busy === 'settings' ? <Loader2 className="spin" size={18} /> : <WandSparkles size={18} />}
-              自动填写定位
+              {mode === 'taobao' ? '自动填写买家定位' : '自动填写定位'}
             </button>
             <dl className="setting-summary">
               <div>
@@ -644,20 +848,20 @@ export default function App() {
                 <dd>{config.visualStyle}</dd>
               </div>
               <div>
-                <dt>读者</dt>
+                <dt>{mode === 'taobao' ? '买家' : '读者'}</dt>
                 <dd>{config.audience}</dd>
               </div>
             </dl>
           </div>
 
           <div className="range-row">
-            <label htmlFor="page-count">页数</label>
+            <label htmlFor="page-count">{mode === 'taobao' ? '张数' : '页数'}</label>
             <strong>{config.pageCount}</strong>
             <input
               id="page-count"
               type="range"
-              min={3}
-              max={10}
+              min={bounds.min}
+              max={bounds.max}
               value={config.pageCount}
               onChange={(event) => setConfig(normalizeConfig({ ...config, pageCount: Number(event.target.value) }))}
             />
@@ -670,7 +874,7 @@ export default function App() {
                 checked={config.useCoverReference}
                 onChange={(event) => setConfig(normalizeConfig({ ...config, useCoverReference: event.target.checked }))}
               />
-              <span>整套保持同一风格</span>
+              <span>{mode === 'taobao' ? '整套保持商品一致' : '整套保持同一风格'}</span>
             </label>
           </div>
 
@@ -715,7 +919,7 @@ export default function App() {
                       key={page.id}
                       onClick={() => setSelectedPageId(page.id)}
                     >
-                      <div className="page-image">
+                      <div className={classNames('page-image', project.config.mode === 'taobao' && 'square')}>
                         {image ? <img src={image} alt={page.headline} /> : <span>{page.index + 1}</span>}
                       </div>
                       <div className="page-meta">
@@ -730,7 +934,7 @@ export default function App() {
               {selectedPage && pageDraft && (
                 <div className="detail-band">
                   <div className="page-editor">
-                    <p className="eyebrow">{selectedPage.type} / {selectedPage.index + 1}</p>
+                    <p className="eyebrow">{pageTypeLabel(selectedPage.type, mode)} / {selectedPage.index + 1}</p>
                     <label className="field-block">
                       <span>主标题</span>
                       <input

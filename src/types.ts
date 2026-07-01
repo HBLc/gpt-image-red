@@ -1,4 +1,5 @@
 export type PageType = 'cover' | 'content' | 'summary'
+export type ProjectMode = 'xhs' | 'taobao'
 
 export type Field =
   | '生活方式'
@@ -25,6 +26,7 @@ export type ImageFormat = 'png' | 'jpeg' | 'webp'
 export type ModerationLevel = 'auto' | 'low'
 
 export interface StudioConfig {
+  mode: ProjectMode
   field: Field
   audience: string
   visualStyle: VisualStyle
@@ -70,6 +72,7 @@ export interface ComposeResponse {
 
 export interface SuggestSettingsRequest {
   topic: string
+  mode?: ProjectMode
 }
 
 export interface SuggestSettingsResponse {

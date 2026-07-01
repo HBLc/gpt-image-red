@@ -1,26 +1,55 @@
-import type { ComposeRequest, PageType, XhsPage } from '../src/types'
+import type { ComposeRequest, PageType, ProjectMode, XhsPage } from '../src/types'
 
-function pageTypeLabel(type: PageType): string {
+function getMode(config: ComposeRequest['config']): ProjectMode {
+  return config.mode ?? 'xhs'
+}
+
+function pageTypeLabel(type: PageType, mode: ProjectMode): string {
+  if (mode === 'taobao') {
+    if (type === 'cover') return '主图'
+    if (type === 'summary') return '收口'
+    return '卖点'
+  }
   if (type === 'cover') return '封面'
   if (type === 'summary') return '总结'
   return '内容'
 }
 
-function formatPageContent(page: XhsPage): string {
+function formatPageContent(page: XhsPage, mode: ProjectMode): string {
   return [
-    `[${pageTypeLabel(page.type)}]`,
+    `[${pageTypeLabel(page.type, mode)}]`,
     page.headline ? `标题：${page.headline}` : '',
     page.subhead ? `副标题：${page.subhead}` : '',
     page.bullets.length ? page.bullets.map((item) => `- ${item}`).join('\n') : '',
-    page.visualBrief ? `配图建议：${page.visualBrief}` : '',
+    page.visualBrief ? `${mode === 'taobao' ? '画面建议' : '配图建议'}：${page.visualBrief}` : '',
   ].filter(Boolean).join('\n')
 }
 
-function formatFullOutline(pages: XhsPage[]): string {
-  return pages.map(formatPageContent).join('\n\n<page>\n\n')
+function formatFullOutline(pages: XhsPage[], mode: ProjectMode): string {
+  return pages.map((page) => formatPageContent(page, mode)).join('\n\n<page>\n\n')
 }
 
-export function buildSettingsPrompt(topic: string): string {
+export function buildSettingsPrompt(topic: string, mode: ProjectMode = 'xhs'): string {
+  if (mode === 'taobao') {
+    return [
+      '你是淘宝电商商品定位助手。',
+      '根据商品或活动描述判断最适合的商品领域、视觉风格和目标买家。',
+      '输出必须是严格 JSON，不要 Markdown，不要解释。',
+      '',
+      `商品或活动：${topic}`,
+      '',
+      '可选领域只能是：生活方式、美妆护肤、职场效率、学习成长、旅行探店、美食烘焙、运动健康、母婴家庭、家居收纳、数码工具。',
+      '可选视觉风格只能是：清爽实用、杂志质感、手账拼贴、专业干货、温暖日常、科技极简。',
+      '',
+      'JSON 结构：',
+      '{',
+      '  "field": "领域",',
+      '  "visualStyle": "视觉风格",',
+      '  "audience": "目标买家，12到24个中文字符"',
+      '}',
+    ].join('\n')
+  }
+
   return [
     '你是小红书内容定位助手。',
     '根据选题判断最适合的领域、视觉风格和目标读者。',
@@ -41,6 +70,49 @@ export function buildSettingsPrompt(topic: string): string {
 }
 
 export function buildContentPrompt({ topic, config }: ComposeRequest): string {
+  if (getMode(config) === 'taobao') {
+    return [
+      '你是淘宝电商视觉策划和商品卖点编辑。',
+      '用户会给你商品或活动描述，你需要生成一套可直接出淘宝宣传图的图片方案，并补充商品标题、详情文案和卖点标签。',
+      '输出必须是严格 JSON，不要 Markdown，不要解释。',
+      '',
+      '商品或活动：',
+      topic,
+      '',
+      `商品领域：${config.field}`,
+      `目标买家：${config.audience || '淘宝潜在买家'}`,
+      `视觉风格：${config.visualStyle}`,
+      `生成张数：${config.pageCount}`,
+      '',
+      'JSON 结构：',
+      '{',
+      '  "titleOptions": ["商品标题1", "商品标题2", "商品标题3"],',
+      '  "caption": "详情页或投放文案，使用\\n分段",',
+      '  "tags": ["卖点1", "卖点2"],',
+      '  "pages": [',
+      '    {',
+      '      "type": "cover|content|summary",',
+      '      "headline": "图片主标题",',
+      '      "subhead": "辅助利益点，可为空",',
+      '      "bullets": ["商品卖点1", "商品卖点2"],',
+      '      "visualBrief": "画面说明"',
+      '    }',
+      '  ]',
+      '}',
+      '',
+      '要求：',
+      '1. 第一张必须是商品主图，type 为 cover，突出商品主体和核心利益点。',
+      '2. 中间页为卖点图、场景图、细节图或对比图，type 为 content。',
+      '3. 最后一张为促销收口或购买理由总结，type 为 summary。',
+      '4. pages 数组必须正好等于生成张数。',
+      '5. 文案要清楚、短促、有转化力，但不要虚假承诺。',
+      '6. 每张图都要说明商品主体、背景、卖点文字和视觉重点。',
+      '7. 如果用户上传参考图，后续出图要保留商品外观、材质、颜色和主要结构。',
+      '8. 不出现淘宝 logo、平台水印、二维码、店铺 ID。',
+      '9. 不写医疗、功效、价格、销量等无法从输入证明的绝对化表述。',
+    ].join('\n')
+  }
+
   return [
     '你是一个小红书内容创作专家。',
     '用户会给你一个要求以及说明，你需要生成一个适合小红书的图文内容大纲，并补充发布标题、文案和标签。',
@@ -94,8 +166,69 @@ export function buildImagePrompt(args: {
   hasReference: boolean
 }): string {
   const { topic, page, pageType, config, fullPageList, hasReference } = args
-  const pageText = formatPageContent(page)
-  const outline = formatFullOutline(fullPageList)
+  const mode = getMode(config)
+  const pageText = formatPageContent(page, mode)
+  const outline = formatFullOutline(fullPageList, mode)
+
+  if (mode === 'taobao') {
+    return [
+      '请生成一张淘宝电商风格的商品宣传图。',
+      '【合规特别注意】不要带有淘宝 logo、平台水印、二维码、店铺 ID 或手机边框。',
+      '【合规特别注意】如果参考图片里有水印、logo、人物隐私信息，请去掉。',
+      '',
+      '当前图片内容：',
+      pageText,
+      '',
+      `图片类型：${pageTypeLabel(pageType, mode)}`,
+      '',
+      '如果上传了参考图，必须保持商品外观、材质、颜色、比例和关键结构一致，只优化背景、灯光、构图和促销排版。没有参考图时，根据用户原始需求生成合理商品主体，避免编造品牌标识。',
+      '',
+      '设计要求：',
+      '',
+      '1. 整体风格',
+      '- 淘宝/天猫商品宣传图质感',
+      '- 商品主体清楚，第一眼知道卖什么',
+      '- 画面干净，有明确转化焦点',
+      '- 配色和谐，符合商品品类',
+      `- 符合「${config.visualStyle}」视觉风格`,
+      '',
+      '2. 文案排版',
+      '- 文字清晰可读，核心卖点最大',
+      '- 卖点短句不超过三层层级',
+      '- 促销信息要像电商活动页，不要像社交笔记',
+      '- 所有文字必须完整呈现，不能旋转或倒置',
+      '',
+      '3. 视觉元素',
+      '- 商品占画面主要位置',
+      '- 可以加入卖点标签、价格位占位、优惠角标或质感背景',
+      '- 背景不能抢商品主体',
+      '- 不生成平台 UI、聊天截图、订单页或手机壳画面',
+      '',
+      '4. 图片类型特殊要求',
+      '[主图] 类型：商品最大、利益点最直接，适合商品列表和详情页首屏。',
+      '[卖点] 类型：突出一个功能、材质、场景或对比，信息层级清楚。',
+      '[收口] 类型：总结购买理由、活动利益或套装信息，形成下单动机。',
+      '',
+      '5. 技术规格',
+      '- 方图 1:1 比例，适合淘宝主图和商品宣传图',
+      '- 高清画质',
+      '- 不要白色留边',
+      '- 不要生成真实品牌商标，除非用户输入里明确提供',
+      '',
+      '商品或活动原始需求：',
+      topic,
+      '',
+      `商品领域：${config.field}`,
+      `目标买家：${config.audience || '淘宝潜在买家'}`,
+      '',
+      '完整宣传图结构参考：',
+      '---',
+      outline,
+      '---',
+      '',
+      '请根据以上要求，生成一张可直接用于淘宝商品宣传的图片。请直接给出图片。',
+    ].join('\n')
+  }
 
   return [
     '请生成一张小红书风格的图文内容图片。',
@@ -105,7 +238,7 @@ export function buildImagePrompt(args: {
     '页面内容：',
     pageText,
     '',
-    `页面类型：${pageTypeLabel(pageType)}`,
+    `页面类型：${pageTypeLabel(pageType, mode)}`,
     '',
     hasReference
       ? '如果当前页面类型不是封面页的话，你要参考输入图片作为封面的样式。后续生成风格要严格参考封面的风格，保持风格统一。'
