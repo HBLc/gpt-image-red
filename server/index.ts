@@ -335,16 +335,16 @@ function normalizeBase64Image(value: string, fallbackMime: string): string {
   return value.startsWith('data:') ? value : `data:${fallbackMime};base64,${value}`
 }
 
-async function fetchImageAsDataUrl(url: string, fallbackMime: string): Promise<string> {
+async function fetchImageAsDataUrl(url: string, fallbackMime: string, signal?: AbortSignal): Promise<string> {
   if (url.startsWith('data:')) return url
-  const response = await fetch(url, { cache: 'no-store' })
+  const response = await fetch(url, { cache: 'no-store', signal })
   if (!response.ok) throw new Error(`图片 URL 下载失败：HTTP ${response.status}`)
   const contentType = response.headers.get('content-type') || fallbackMime
   const bytes = Buffer.from(await response.arrayBuffer())
   return `data:${contentType};base64,${bytes.toString('base64')}`
 }
 
-async function parseImageApiResponse(response: Response, mime: string): Promise<string> {
+async function parseImageApiResponse(response: Response, mime: string, signal?: AbortSignal): Promise<string> {
   if (!response.ok) throw new Error(await getApiErrorMessage(response))
 
   const payload = await response.json() as {
@@ -361,26 +361,43 @@ async function parseImageApiResponse(response: Response, mime: string): Promise<
 
   for (const item of items) {
     if (item?.b64_json) return normalizeBase64Image(item.b64_json, mime)
-    if (item?.url) return fetchImageAsDataUrl(item.url, mime)
+    if (item?.url) return fetchImageAsDataUrl(item.url, mime, signal)
   }
 
   throw new Error(`Image API did not return recognizable image data: ${JSON.stringify(payload).slice(0, 1000)}`)
+}
+
+function combineAbortSignals(signals: Array<AbortSignal | undefined>): AbortSignal {
+  const activeSignals = signals.filter(Boolean) as AbortSignal[]
+  const controller = new AbortController()
+
+  for (const signal of activeSignals) {
+    if (signal.aborted) {
+      controller.abort()
+      break
+    }
+    signal.addEventListener('abort', () => controller.abort(), { once: true })
+  }
+
+  return controller.signal
 }
 
 async function callImageApi(args: {
   prompt: string
   config: XhsProject['config']
   referenceImage?: string
+  signal?: AbortSignal
 }): Promise<{ image: string; mime: string }> {
-  const { prompt, config, referenceImage } = args
+  const { prompt, config, referenceImage, signal } = args
   const mime = getImageMime(config.outputFormat)
   const imageModel = getImageModel()
   const headers = {
     Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
   }
 
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), Number(process.env.OPENAI_IMAGE_TIMEOUT_SECONDS || 180) * 1000)
+  const timeoutController = new AbortController()
+  const requestSignal = combineAbortSignals([timeoutController.signal, signal])
+  const timeout = setTimeout(() => timeoutController.abort(), Number(process.env.OPENAI_IMAGE_TIMEOUT_SECONDS || 180) * 1000)
 
   try {
     if (referenceImage) {
@@ -400,9 +417,9 @@ async function callImageApi(args: {
         headers,
         body: formData,
         cache: 'no-store',
-        signal: controller.signal,
+        signal: requestSignal,
       })
-      return { image: await parseImageApiResponse(response, mime), mime }
+      return { image: await parseImageApiResponse(response, mime, requestSignal), mime }
     }
 
     const body = {
@@ -422,12 +439,21 @@ async function callImageApi(args: {
       },
       body: JSON.stringify(body),
       cache: 'no-store',
-      signal: controller.signal,
+      signal: requestSignal,
     })
-    return { image: await parseImageApiResponse(response, mime), mime }
+    return { image: await parseImageApiResponse(response, mime, requestSignal), mime }
   } finally {
     clearTimeout(timeout)
   }
+}
+
+function requestAbortSignal(req: express.Request, res: express.Response): AbortSignal {
+  const controller = new AbortController()
+  req.on('aborted', () => controller.abort())
+  res.on('close', () => {
+    if (!res.writableEnded) controller.abort()
+  })
+  return controller.signal
 }
 
 app.get('/api/health', (_req, res) => {
@@ -516,7 +542,7 @@ app.post('/api/compose', async (req, res, next) => {
           content: prompt,
         },
       ],
-    } as never)
+    } as never, { signal: requestAbortSignal(req, res) } as never)
 
     const text = readOutputText(response)
     const parsed = parseJsonObject(text)
@@ -559,6 +585,7 @@ app.post('/api/image', async (req, res, next) => {
       prompt,
       config,
       referenceImage: request.referenceImage,
+      signal: requestAbortSignal(req, res),
     })
 
     res.json({

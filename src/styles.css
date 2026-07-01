@@ -382,6 +382,7 @@ input[type='range'] {
 
 .button-row {
   gap: 10px;
+  flex-wrap: wrap;
 }
 
 button {
@@ -437,6 +438,23 @@ button:disabled {
 .secondary-button.full {
   width: 100%;
   flex: unset;
+}
+
+.stop-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex: 0 0 100%;
+  border: 1px solid rgba(180, 35, 24, 0.24);
+  background: #fff0ed;
+  color: var(--danger);
+  padding: 10px 14px;
+  font-weight: 900;
+}
+
+.stop-button:hover:not(:disabled) {
+  background: #ffe2dc;
 }
 
 .auto-settings {
@@ -549,6 +567,43 @@ button:disabled {
 .setting-summary dd {
   color: var(--ink);
   font-weight: 800;
+}
+
+.settings-reminder {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(185, 129, 25, 0.28);
+  border-radius: 8px;
+  background: #fff8e8;
+  padding: 10px;
+  margin: 0 0 12px;
+}
+
+.settings-reminder p {
+  margin: 0;
+  color: #764200;
+  line-height: 1.45;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.settings-reminder div {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.settings-reminder button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid rgba(185, 129, 25, 0.3);
+  background: var(--surface-strong);
+  color: var(--ink);
+  padding: 8px;
+  font-size: 13px;
+  font-weight: 900;
 }
 
 .error-box {

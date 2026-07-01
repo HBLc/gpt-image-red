@@ -1,5 +1,9 @@
 import type { ComposeRequest, ComposeResponse, EnvConfigResponse, GenerateImageRequest, GenerateImageResponse, HealthResponse, SaveEnvConfigRequest, SuggestSettingsRequest, SuggestSettingsResponse } from './types'
 
+interface ApiOptions {
+  signal?: AbortSignal
+}
+
 async function readJson<T>(response: Response): Promise<T> {
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) {
@@ -28,11 +32,12 @@ export async function saveEnvConfig(request: SaveEnvConfigRequest): Promise<EnvC
   return readJson<EnvConfigResponse>(response)
 }
 
-export async function composeProject(request: ComposeRequest): Promise<ComposeResponse> {
+export async function composeProject(request: ComposeRequest, options: ApiOptions = {}): Promise<ComposeResponse> {
   const response = await fetch('/api/compose', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request),
+    signal: options.signal,
   })
   return readJson<ComposeResponse>(response)
 }
@@ -46,11 +51,12 @@ export async function suggestSettings(request: SuggestSettingsRequest): Promise<
   return readJson<SuggestSettingsResponse>(response)
 }
 
-export async function generateImage(request: GenerateImageRequest): Promise<GenerateImageResponse> {
+export async function generateImage(request: GenerateImageRequest, options: ApiOptions = {}): Promise<GenerateImageResponse> {
   const response = await fetch('/api/image', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request),
+    signal: options.signal,
   })
   return readJson<GenerateImageResponse>(response)
 }

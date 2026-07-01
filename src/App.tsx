@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertCircle,
   Archive,
   Check,
   ChevronLeft,
   ChevronRight,
+  CircleStop,
   Copy,
   Download,
   Eye,
@@ -60,6 +61,7 @@ const defaultConfig: StudioConfig = {
 
 type PageStatus = 'idle' | 'loading' | 'done' | 'error'
 type BusyState = 'settings' | 'compose' | 'page' | 'images' | 'all' | null
+type PendingSettingsAction = 'compose' | 'all'
 
 interface PageDraft {
   headline: string
@@ -67,6 +69,19 @@ interface PageDraft {
   bulletsText: string
   visualBrief: string
   imagePrompt: string
+}
+
+interface ModeWorkspace {
+  topic: string
+  config: StudioConfig
+  project: XhsProject | null
+  images: Record<string, string>
+  pageStatus: Record<string, PageStatus>
+  pageErrors: Record<string, string>
+  selectedPageId: string
+  referenceImage: string
+  referenceImageName: string
+  settingsReady: boolean
 }
 
 function classNames(...items: Array<string | false | undefined>): string {
@@ -127,6 +142,25 @@ function modeDefaults(mode: ProjectMode, current: StudioConfig): StudioConfig {
     visualStyle: mode === 'taobao' ? '杂志质感' : '清爽实用',
     useCoverReference: true,
   })
+}
+
+function createModeWorkspace(mode: ProjectMode): ModeWorkspace {
+  return {
+    topic: mode === 'taobao' ? TAOBAO_DEFAULT_TOPIC : XHS_DEFAULT_TOPIC,
+    config: mode === 'taobao' ? modeDefaults('taobao', defaultConfig) : defaultConfig,
+    project: null,
+    images: {},
+    pageStatus: {},
+    pageErrors: {},
+    selectedPageId: '',
+    referenceImage: '',
+    referenceImageName: '',
+    settingsReady: false,
+  }
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError'
 }
 
 function readImageFile(file: File): Promise<string> {
@@ -354,6 +388,8 @@ export default function App() {
   const [history, setHistory] = useState<SavedProject[]>([])
   const [busy, setBusy] = useState<BusyState>(null)
   const [error, setError] = useState('')
+  const [settingsReady, setSettingsReady] = useState(false)
+  const [settingsPromptAction, setSettingsPromptAction] = useState<PendingSettingsAction | null>(null)
   const [showConfig, setShowConfig] = useState(false)
   const [showApiKey, setShowApiKey] = useState(false)
   const [envConfig, setEnvConfig] = useState<EnvConfig>(emptyEnvConfig)
@@ -362,6 +398,12 @@ export default function App() {
   const [envMessage, setEnvMessage] = useState('')
   const [referenceImage, setReferenceImage] = useState('')
   const [referenceImageName, setReferenceImageName] = useState('')
+  const workspaceRef = useRef<Record<ProjectMode, ModeWorkspace>>({
+    xhs: createModeWorkspace('xhs'),
+    taobao: createModeWorkspace('taobao'),
+  })
+  const activeModeRef = useRef<ProjectMode>('xhs')
+  const activeGenerationRef = useRef<{ controller: AbortController; mode: ProjectMode; kind: BusyState } | null>(null)
 
   useEffect(() => {
     void refreshHealth()
@@ -390,6 +432,137 @@ export default function App() {
       setEnvError(err instanceof Error ? err.message : String(err))
     }
   }
+
+  const mode = config.mode ?? 'xhs'
+  const generatedCount = useMemo(() => Object.values(images).filter(Boolean).length, [images])
+  const bounds = pageBounds(mode)
+
+  function currentWorkspaceSnapshot(): ModeWorkspace {
+    return {
+      topic,
+      config: normalizeConfig(config),
+      project,
+      images,
+      pageStatus,
+      pageErrors,
+      selectedPageId,
+      referenceImage,
+      referenceImageName,
+      settingsReady,
+    }
+  }
+
+  function patchWorkspace(targetMode: ProjectMode, patch: Partial<ModeWorkspace>) {
+    const next = {
+      ...workspaceRef.current[targetMode],
+      ...patch,
+    }
+    workspaceRef.current[targetMode] = next
+
+    if (activeModeRef.current !== targetMode) return
+    if ('topic' in patch) setTopic(next.topic)
+    if ('config' in patch) setConfig(next.config)
+    if ('project' in patch) setProject(next.project)
+    if ('images' in patch) setImages(next.images)
+    if ('pageStatus' in patch) setPageStatus(next.pageStatus)
+    if ('pageErrors' in patch) setPageErrors(next.pageErrors)
+    if ('selectedPageId' in patch) setSelectedPageId(next.selectedPageId)
+    if ('referenceImage' in patch) setReferenceImage(next.referenceImage)
+    if ('referenceImageName' in patch) setReferenceImageName(next.referenceImageName)
+    if ('settingsReady' in patch) setSettingsReady(next.settingsReady)
+  }
+
+  function applyWorkspace(targetMode: ProjectMode, snapshot: ModeWorkspace) {
+    const next = {
+      ...snapshot,
+      config: normalizeConfig(snapshot.config),
+    }
+    activeModeRef.current = targetMode
+    workspaceRef.current[targetMode] = next
+    setTopic(next.topic)
+    setConfig(next.config)
+    setProject(next.project)
+    setImages(next.images)
+    setPageStatus(next.pageStatus)
+    setPageErrors(next.pageErrors)
+    setSelectedPageId(next.selectedPageId)
+    setPreviewPageId('')
+    setIsPreviewActualSize(false)
+    setPageDraft(null)
+    setReferenceImage(next.referenceImage)
+    setReferenceImageName(next.referenceImageName)
+    setSettingsReady(next.settingsReady)
+    setSettingsPromptAction(null)
+    setError('')
+  }
+
+  function updateTopic(value: string) {
+    setTopic(value)
+    setSettingsReady(false)
+    setSettingsPromptAction(null)
+    patchWorkspace(mode, {
+      topic: value,
+      settingsReady: false,
+    })
+  }
+
+  function updateConfig(nextConfig: StudioConfig) {
+    const normalized = normalizeConfig(nextConfig)
+    setConfig(normalized)
+    patchWorkspace(normalized.mode, { config: normalized })
+  }
+
+  function setImagesForMode(targetMode: ProjectMode, updater: (current: Record<string, string>) => Record<string, string>) {
+    patchWorkspace(targetMode, { images: updater(workspaceRef.current[targetMode].images) })
+  }
+
+  function setPageStatusForMode(targetMode: ProjectMode, updater: (current: Record<string, PageStatus>) => Record<string, PageStatus>) {
+    patchWorkspace(targetMode, { pageStatus: updater(workspaceRef.current[targetMode].pageStatus) })
+  }
+
+  function setPageErrorsForMode(targetMode: ProjectMode, updater: (current: Record<string, string>) => Record<string, string>) {
+    patchWorkspace(targetMode, { pageErrors: updater(workspaceRef.current[targetMode].pageErrors) })
+  }
+
+  function resetLoadingStatuses(targetMode: ProjectMode) {
+    setPageStatusForMode(targetMode, (current) => Object.fromEntries(
+      Object.entries(current).map(([pageId, status]) => [pageId, status === 'loading' ? 'idle' : status]),
+    ))
+  }
+
+  function beginGeneration(kind: Exclude<BusyState, null>, targetMode = mode): AbortController {
+    activeGenerationRef.current?.controller.abort()
+    const controller = new AbortController()
+    activeGenerationRef.current = { controller, mode: targetMode, kind }
+    setBusy(kind)
+    setError('')
+    return controller
+  }
+
+  function finishGeneration(controller: AbortController) {
+    if (activeGenerationRef.current?.controller !== controller) return
+    activeGenerationRef.current = null
+    setBusy(null)
+  }
+
+  function stopGeneration() {
+    const generation = activeGenerationRef.current
+    if (!generation) return
+    generation.controller.abort()
+    activeGenerationRef.current = null
+    resetLoadingStatuses(generation.mode)
+    setBusy(null)
+    setError('已停止生成')
+  }
+
+  function settingsLabel() {
+    return mode === 'taobao' ? '买家定位' : '定位'
+  }
+
+  useEffect(() => {
+    activeModeRef.current = mode
+    workspaceRef.current[mode] = currentWorkspaceSnapshot()
+  }, [mode, topic, config, project, images, pageStatus, pageErrors, selectedPageId, referenceImage, referenceImageName, settingsReady])
 
   useEffect(() => {
     if (!selectedPageId && project?.pages[0]) setSelectedPageId(project.pages[0].id)
@@ -454,29 +627,35 @@ export default function App() {
     setIsPreviewActualSize(false)
   }
 
-  const generatedCount = useMemo(() => Object.values(images).filter(Boolean).length, [images])
-  const mode = config.mode ?? 'xhs'
-  const bounds = pageBounds(mode)
-
-  async function fillSettings() {
+  async function fillSettings(): Promise<boolean> {
+    const actionMode = mode
     const cleanTopic = topic.trim()
     if (!cleanTopic) {
       setError('请输入选题')
-      return
+      return false
     }
 
     setBusy('settings')
     setError('')
     try {
-      const next = await suggestSettings({ topic: cleanTopic, mode })
-      setConfig((current) => normalizeConfig({
-        ...current,
-        field: fields.includes(next.field) ? next.field : current.field,
-        visualStyle: styles.includes(next.visualStyle) ? next.visualStyle : current.visualStyle,
-        audience: next.audience || current.audience,
-      }))
+      const next = await suggestSettings({ topic: cleanTopic, mode: actionMode })
+      const currentConfig = workspaceRef.current[actionMode].config
+      const nextConfig = normalizeConfig({
+        ...currentConfig,
+        field: fields.includes(next.field) ? next.field : currentConfig.field,
+        visualStyle: styles.includes(next.visualStyle) ? next.visualStyle : currentConfig.visualStyle,
+        audience: next.audience || currentConfig.audience,
+      })
+      patchWorkspace(actionMode, {
+        topic: cleanTopic,
+        config: nextConfig,
+        settingsReady: true,
+      })
+      setSettingsPromptAction(null)
+      return true
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
+      return false
     } finally {
       setBusy(null)
     }
@@ -500,17 +679,8 @@ export default function App() {
 
   function switchMode(nextMode: ProjectMode) {
     if (nextMode === mode) return
-    setConfig((current) => modeDefaults(nextMode, current))
-    setProject(null)
-    setImages({})
-    setPageStatus({})
-    setPageErrors({})
-    setSelectedPageId('')
-    setPreviewPageId('')
-    setIsPreviewActualSize(false)
-    setPageDraft(null)
-    if (nextMode === 'taobao' && topic === XHS_DEFAULT_TOPIC) setTopic(TAOBAO_DEFAULT_TOPIC)
-    if (nextMode === 'xhs' && topic === TAOBAO_DEFAULT_TOPIC) setTopic(XHS_DEFAULT_TOPIC)
+    workspaceRef.current[mode] = currentWorkspaceSnapshot()
+    applyWorkspace(nextMode, workspaceRef.current[nextMode] ?? createModeWorkspace(nextMode))
   }
 
   async function uploadReferenceImage(file: File | undefined) {
@@ -525,82 +695,114 @@ export default function App() {
     }
     setError('')
     try {
-      setReferenceImage(await readImageFile(file))
-      setReferenceImageName(file.name)
+      const nextImage = await readImageFile(file)
+      patchWorkspace(mode, {
+        referenceImage: nextImage,
+        referenceImageName: file.name,
+      })
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
   }
 
   function clearReferenceImage() {
-    setReferenceImage('')
-    setReferenceImageName('')
+    patchWorkspace(mode, {
+      referenceImage: '',
+      referenceImageName: '',
+    })
   }
 
-  async function createProject(): Promise<XhsProject | null> {
-    const cleanTopic = topic.trim()
+  async function composeCurrentProject(signal: AbortSignal, operationMode = mode): Promise<XhsProject | null> {
+    const workspace = workspaceRef.current[operationMode]
+    const cleanTopic = workspace.topic.trim()
     if (!cleanTopic) {
       setError('请输入选题')
       return null
     }
 
-    setBusy('compose')
-    setError('')
     try {
-      const cleanConfig = normalizeConfig(config)
-      setConfig(cleanConfig)
-      const response = await composeProject({ topic: cleanTopic, config: cleanConfig })
-      setProject(response.project)
-      setImages({})
-      setPageStatus(Object.fromEntries(response.project.pages.map((page) => [page.id, 'idle'])))
-      setPageErrors({})
-      setSelectedPageId(response.project.pages[0]?.id ?? '')
-      setPreviewPageId('')
-      setIsPreviewActualSize(false)
+      const cleanConfig = normalizeConfig(workspace.config)
+      patchWorkspace(operationMode, {
+        topic: cleanTopic,
+        config: cleanConfig,
+      })
+      const response = await composeProject({ topic: cleanTopic, config: cleanConfig }, { signal })
+      if (signal.aborted) return null
+      patchWorkspace(operationMode, {
+        project: response.project,
+        images: {},
+        pageStatus: Object.fromEntries(response.project.pages.map((page) => [page.id, 'idle'])),
+        pageErrors: {},
+        selectedPageId: response.project.pages[0]?.id ?? '',
+      })
+      if (activeModeRef.current === operationMode) {
+        setPreviewPageId('')
+        setIsPreviewActualSize(false)
+      }
       return response.project
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      if (!signal.aborted && !isAbortError(err) && activeModeRef.current === operationMode) {
+        setError(err instanceof Error ? err.message : String(err))
+      }
       return null
-    } finally {
-      setBusy(null)
     }
   }
 
-  async function generatePageImage(targetProject: XhsProject, page: XhsPage, referenceImage?: string): Promise<string | null> {
+  async function createProject(): Promise<XhsProject | null> {
+    const operationMode = mode
+    const controller = beginGeneration('compose', operationMode)
+    try {
+      return await composeCurrentProject(controller.signal, operationMode)
+    } finally {
+      finishGeneration(controller)
+    }
+  }
+
+  async function generatePageImage(targetProject: XhsProject, page: XhsPage, referenceImage?: string, signal?: AbortSignal): Promise<string | null> {
     const cleanProject = {
       ...targetProject,
       config: normalizeConfig(targetProject.config),
     }
-    setPageStatus((current) => ({ ...current, [page.id]: 'loading' }))
-    setPageErrors((current) => ({ ...current, [page.id]: '' }))
+    const operationMode = cleanProject.config.mode
+    setPageStatusForMode(operationMode, (current) => ({ ...current, [page.id]: 'loading' }))
+    setPageErrorsForMode(operationMode, (current) => ({ ...current, [page.id]: '' }))
     try {
-      const response = await generateImage({ project: cleanProject, page, referenceImage })
-      setImages((current) => ({ ...current, [page.id]: response.image }))
-      setPageStatus((current) => ({ ...current, [page.id]: 'done' }))
+      const response = await generateImage({ project: cleanProject, page, referenceImage }, { signal })
+      if (signal?.aborted) return null
+      setImagesForMode(operationMode, (current) => ({ ...current, [page.id]: response.image }))
+      setPageStatusForMode(operationMode, (current) => ({ ...current, [page.id]: 'done' }))
       return response.image
     } catch (err) {
-      setPageStatus((current) => ({ ...current, [page.id]: 'error' }))
-      setPageErrors((current) => ({ ...current, [page.id]: err instanceof Error ? err.message : String(err) }))
+      if (signal?.aborted || isAbortError(err)) {
+        setPageStatusForMode(operationMode, (current) => ({ ...current, [page.id]: 'idle' }))
+        return null
+      }
+      setPageStatusForMode(operationMode, (current) => ({ ...current, [page.id]: 'error' }))
+      setPageErrorsForMode(operationMode, (current) => ({ ...current, [page.id]: err instanceof Error ? err.message : String(err) }))
       return null
     }
   }
 
-  async function generateAllImages(targetProject = project) {
+  async function generateAllImages(targetProject = project, options: { signal?: AbortSignal; manageBusy?: boolean } = {}) {
     if (!targetProject) return
-    setBusy('images')
-    setError('')
 
     const cleanProject = {
       ...targetProject,
       config: normalizeConfig(targetProject.config),
     }
-    const productReference = cleanProject.config.mode === 'taobao' ? referenceImage : ''
+    const operationMode = cleanProject.config.mode
+    const controller = options.manageBusy === false ? null : beginGeneration('images', operationMode)
+    const signal = options.signal ?? controller?.signal
+    setError('')
+
+    const productReference = operationMode === 'taobao' ? workspaceRef.current[operationMode].referenceImage : ''
     const nextImages: Record<string, string> = {}
     try {
       const cover = cleanProject.pages[0]
       let coverImage = ''
       if (cover) {
-        const result = await generatePageImage(cleanProject, cover, productReference || undefined)
+        if (signal?.aborted) return
+        const result = await generatePageImage(cleanProject, cover, productReference || undefined, signal)
         if (result) {
           coverImage = result
           nextImages[cover.id] = result
@@ -608,40 +810,86 @@ export default function App() {
       }
 
       for (const page of cleanProject.pages.slice(1)) {
-        const reference = cleanProject.config.mode === 'taobao'
+        if (signal?.aborted) return
+        const reference = operationMode === 'taobao'
           ? productReference || (cleanProject.config.useCoverReference ? coverImage : undefined)
           : cleanProject.config.useCoverReference ? coverImage : undefined
-        const result = await generatePageImage(cleanProject, page, reference)
+        const result = await generatePageImage(cleanProject, page, reference, signal)
         if (result) nextImages[page.id] = result
       }
 
-      const merged = { ...images, ...nextImages }
-      setImages(merged)
+      if (signal?.aborted) return
+      const merged = workspaceRef.current[operationMode].images
       const saved = rememberProject(toSavedProject(cleanProject, merged))
       setHistory(saved)
     } finally {
-      setBusy(null)
+      if (controller) finishGeneration(controller)
     }
   }
 
   async function generateEverything() {
-    setBusy('all')
-    const created = await createProject()
-    if (created) await generateAllImages(created)
-    setBusy(null)
+    const operationMode = mode
+    const controller = beginGeneration('all', operationMode)
+    try {
+      const created = await composeCurrentProject(controller.signal, operationMode)
+      if (created && !controller.signal.aborted) await generateAllImages(created, { signal: controller.signal, manageBusy: false })
+    } finally {
+      finishGeneration(controller)
+    }
+  }
+
+  async function runGenerationAction(action: PendingSettingsAction) {
+    if (action === 'compose') {
+      await createProject()
+      return
+    }
+    await generateEverything()
+  }
+
+  async function requestGeneration(action: PendingSettingsAction) {
+    if (busy) return
+    if (!topic.trim()) {
+      setError('请输入选题')
+      return
+    }
+    if (!settingsReady) {
+      setError('')
+      setSettingsPromptAction(action)
+      return
+    }
+    await runGenerationAction(action)
+  }
+
+  async function autoFillAndContinue() {
+    const action = settingsPromptAction
+    if (!action || busy) return
+    const filled = await fillSettings()
+    if (filled) await runGenerationAction(action)
+  }
+
+  async function continueWithoutSettings() {
+    const action = settingsPromptAction
+    if (!action || busy) return
+    setSettingsPromptAction(null)
+    patchWorkspace(mode, { settingsReady: true })
+    await runGenerationAction(action)
   }
 
   function loadSaved(item: SavedProject) {
-    setProject(item)
-    setConfig(normalizeConfig(item.config))
-    setTopic(item.topic)
-    setImages(item.images ?? {})
-    setPageStatus(Object.fromEntries(item.pages.map((page) => [page.id, item.images?.[page.id] ? 'done' : 'idle'])))
-    setPageErrors({})
-    setSelectedPageId(item.pages[0]?.id ?? '')
-    setPreviewPageId('')
-    setIsPreviewActualSize(false)
-    clearReferenceImage()
+    workspaceRef.current[mode] = currentWorkspaceSnapshot()
+    const itemConfig = normalizeConfig(item.config)
+    applyWorkspace(itemConfig.mode, {
+      topic: item.topic,
+      config: itemConfig,
+      project: item,
+      images: item.images ?? {},
+      pageStatus: Object.fromEntries(item.pages.map((page) => [page.id, item.images?.[page.id] ? 'done' : 'idle'])),
+      pageErrors: {},
+      selectedPageId: item.pages[0]?.id ?? '',
+      referenceImage: '',
+      referenceImageName: '',
+      settingsReady: true,
+    })
   }
 
   function deleteSaved(id: string) {
@@ -684,16 +932,16 @@ export default function App() {
       pages: nextProjectBase.pages.map((page) => page.id === selectedPage.id ? updatedPage : page),
     }
 
-    setProject(nextProject)
+    patchWorkspace(mode, { project: nextProject })
     setPageDraft(pageToDraft(updatedPage))
 
     if (options.clearImage !== false) {
-      setImages((current) => {
+      setImagesForMode(mode, (current) => {
         const next = { ...current }
         delete next[updatedPage.id]
         return next
       })
-      setPageStatus((current) => ({ ...current, [updatedPage.id]: 'idle' }))
+      setPageStatusForMode(mode, (current) => ({ ...current, [updatedPage.id]: 'idle' }))
     }
 
     return { project: nextProject, page: updatedPage }
@@ -702,17 +950,19 @@ export default function App() {
   async function generateSelectedPage() {
     const saved = saveSelectedDraft({ clearImage: false })
     if (!saved) return
+    const operationMode = saved.project.config.mode
+    const workspace = workspaceRef.current[operationMode]
     const cover = saved.project.pages[0]
-    const reference = saved.project.config.mode === 'taobao'
-      ? referenceImage || (saved.project.config.useCoverReference && saved.page.index > 0 && cover ? images[cover.id] : undefined)
+    const reference = operationMode === 'taobao'
+      ? workspace.referenceImage || (saved.project.config.useCoverReference && saved.page.index > 0 && cover ? workspace.images[cover.id] : undefined)
       : saved.project.config.useCoverReference && saved.page.index > 0 && cover
-        ? images[cover.id]
+        ? workspace.images[cover.id]
         : undefined
-    setBusy('page')
+    const controller = beginGeneration('page', operationMode)
     try {
-      await generatePageImage(saved.project, saved.page, reference)
+      await generatePageImage(saved.project, saved.page, reference, controller.signal)
     } finally {
-      setBusy(null)
+      finishGeneration(controller)
     }
   }
 
@@ -901,7 +1151,7 @@ export default function App() {
             <span>{mode === 'taobao' ? '商品/活动' : '选题'}</span>
             <textarea
               value={topic}
-              onChange={(event) => setTopic(event.target.value)}
+              onChange={(event) => updateTopic(event.target.value)}
               rows={5}
               placeholder={mode === 'taobao' ? TAOBAO_DEFAULT_TOPIC : XHS_DEFAULT_TOPIC}
             />
@@ -939,7 +1189,7 @@ export default function App() {
           )}
 
           <div className="auto-settings">
-            <button className="secondary-button full" type="button" onClick={fillSettings} disabled={Boolean(busy)}>
+            <button className="secondary-button full" type="button" onClick={() => void fillSettings()} disabled={Boolean(busy)}>
               {busy === 'settings' ? <Loader2 className="spin" size={18} /> : <WandSparkles size={18} />}
               {mode === 'taobao' ? '自动填写买家定位' : '自动填写定位'}
             </button>
@@ -968,7 +1218,7 @@ export default function App() {
               min={bounds.min}
               max={bounds.max}
               value={config.pageCount}
-              onChange={(event) => setConfig(normalizeConfig({ ...config, pageCount: Number(event.target.value) }))}
+              onChange={(event) => updateConfig({ ...config, pageCount: Number(event.target.value) })}
             />
           </div>
 
@@ -977,23 +1227,44 @@ export default function App() {
               <input
                 type="checkbox"
                 checked={config.useCoverReference}
-                onChange={(event) => setConfig(normalizeConfig({ ...config, useCoverReference: event.target.checked }))}
+                onChange={(event) => updateConfig({ ...config, useCoverReference: event.target.checked })}
               />
               <span>{mode === 'taobao' ? '整套保持商品一致' : '整套保持同一风格'}</span>
             </label>
           </div>
 
+          {settingsPromptAction && (
+            <div className="settings-reminder" role="alert">
+              <p>还没有自动填写{settingsLabel()}。建议先自动填写，再生成。</p>
+              <div>
+                <button type="button" onClick={() => void autoFillAndContinue()} disabled={Boolean(busy)}>
+                  {busy === 'settings' ? <Loader2 className="spin" size={16} /> : <WandSparkles size={16} />}
+                  自动填写并继续
+                </button>
+                <button type="button" onClick={() => void continueWithoutSettings()} disabled={Boolean(busy)}>
+                  继续生成
+                </button>
+              </div>
+            </div>
+          )}
+
           {error && <div className="error-box" role="alert">{error}</div>}
 
           <div className="button-row">
-            <button className="secondary-button" type="button" onClick={createProject} disabled={Boolean(busy)}>
+            <button className="secondary-button" type="button" onClick={() => void requestGeneration('compose')} disabled={Boolean(busy)}>
               {busy === 'compose' ? <Loader2 className="spin" size={18} /> : <RefreshCw size={18} />}
               生成方案
             </button>
-            <button className="primary-button" type="button" onClick={generateEverything} disabled={Boolean(busy)}>
+            <button className="primary-button" type="button" onClick={() => void requestGeneration('all')} disabled={Boolean(busy)}>
               {busy ? <Loader2 className="spin" size={18} /> : <Sparkles size={18} />}
               生成整套
             </button>
+            {busy && busy !== 'settings' && (
+              <button className="stop-button" type="button" onClick={stopGeneration}>
+                <CircleStop size={18} />
+                停止
+              </button>
+            )}
           </div>
         </section>
 
