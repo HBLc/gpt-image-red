@@ -40,6 +40,8 @@ const XHS_DEFAULT_TOPIC = '给自由职业者做一套高效工作流图文'
 const TAOBAO_DEFAULT_TOPIC = '便携式咖啡杯，主打不漏水、通勤好看、送礼体面'
 const XHS_DEFAULT_AUDIENCE = '想提升内容质感的新手创作者'
 const TAOBAO_DEFAULT_AUDIENCE = '有明确购买需求的淘宝用户'
+const IMAGE_POOL_SIZE = 2
+const IMAGE_REQUEST_GAP_MS = 5000
 const emptyEnvConfig: EnvConfig = {
   openaiApiKey: '',
   openaiBaseUrl: 'https://api.openai.com/v1',
@@ -62,8 +64,9 @@ const defaultConfig: StudioConfig = {
 }
 
 type PageStatus = 'idle' | 'loading' | 'done' | 'error'
-type BusyState = 'settings' | 'compose' | 'page' | 'images' | 'all' | null
+type BusyState = 'settings' | 'compose' | 'all' | null
 type PendingSettingsAction = 'compose' | 'all'
+type ImageReferenceResolver = string | (() => string | undefined) | undefined
 
 interface PageDraft {
   headline: string
@@ -84,6 +87,16 @@ interface ModeWorkspace {
   referenceImage: string
   referenceImageName: string
   settingsReady: boolean
+}
+
+interface ImageQueueTask {
+  id: string
+  mode: ProjectMode
+  project: XhsProject
+  page: XhsPage
+  referenceImage?: ImageReferenceResolver
+  controller: AbortController
+  resolve: (image: string | null) => void
 }
 
 function classNames(...items: Array<string | false | undefined>): string {
@@ -398,6 +411,8 @@ export default function App() {
   const [health, setHealth] = useState<HealthResponse | null>(null)
   const [history, setHistory] = useState<SavedProject[]>([])
   const [busy, setBusy] = useState<BusyState>(null)
+  const [activeImageCount, setActiveImageCount] = useState(0)
+  const [queuedImageCount, setQueuedImageCount] = useState(0)
   const [error, setError] = useState('')
   const [settingsReady, setSettingsReady] = useState(false)
   const [settingsPromptAction, setSettingsPromptAction] = useState<PendingSettingsAction | null>(null)
@@ -417,8 +432,16 @@ export default function App() {
     xhs: {},
     taobao: {},
   })
+  const pageStatusRef = useRef<Record<ProjectMode, Record<string, PageStatus>>>({
+    xhs: {},
+    taobao: {},
+  })
   const activeModeRef = useRef<ProjectMode>('xhs')
   const activeGenerationRef = useRef<{ controller: AbortController; mode: ProjectMode; kind: BusyState } | null>(null)
+  const imageQueueRef = useRef<ImageQueueTask[]>([])
+  const activeImageTasksRef = useRef<Map<string, ImageQueueTask>>(new Map())
+  const imagePoolTimerRef = useRef<number | null>(null)
+  const lastImageStartAtRef = useRef(0)
 
   useEffect(() => {
     void refreshHealth()
@@ -454,6 +477,8 @@ export default function App() {
   const mode = config.mode ?? 'xhs'
   const generatedCount = useMemo(() => Object.values(images).filter(Boolean).length, [images])
   const bounds = pageBounds(mode)
+  const isImageBusy = activeImageCount + queuedImageCount > 0
+  const isGenerationLocked = Boolean(busy) || isImageBusy
 
   function currentWorkspaceSnapshot(): ModeWorkspace {
     return {
@@ -461,7 +486,7 @@ export default function App() {
       config: normalizeConfig(config),
       project,
       images: imagesRef.current[mode] ?? images,
-      pageStatus,
+      pageStatus: pageStatusRef.current[mode] ?? pageStatus,
       pageErrors,
       selectedPageId,
       referenceImage,
@@ -476,6 +501,7 @@ export default function App() {
       ...patch,
     }
     if ('images' in patch) imagesRef.current[targetMode] = next.images
+    if ('pageStatus' in patch) pageStatusRef.current[targetMode] = next.pageStatus
     workspaceRef.current[targetMode] = next
 
     if (activeModeRef.current !== targetMode) return
@@ -498,6 +524,7 @@ export default function App() {
     }
     activeModeRef.current = targetMode
     imagesRef.current[targetMode] = next.images
+    pageStatusRef.current[targetMode] = next.pageStatus
     workspaceRef.current[targetMode] = next
     setTopic(next.topic)
     setConfig(next.config)
@@ -540,7 +567,9 @@ export default function App() {
   }
 
   function setPageStatusForMode(targetMode: ProjectMode, updater: (current: Record<string, PageStatus>) => Record<string, PageStatus>) {
-    patchWorkspace(targetMode, { pageStatus: updater(workspaceRef.current[targetMode].pageStatus) })
+    const nextStatus = updater(pageStatusRef.current[targetMode] ?? workspaceRef.current[targetMode].pageStatus)
+    pageStatusRef.current[targetMode] = nextStatus
+    patchWorkspace(targetMode, { pageStatus: nextStatus })
   }
 
   function setPageErrorsForMode(targetMode: ProjectMode, updater: (current: Record<string, string>) => Record<string, string>) {
@@ -568,12 +597,156 @@ export default function App() {
     setBusy(null)
   }
 
+  function syncImagePoolState() {
+    setActiveImageCount(activeImageTasksRef.current.size)
+    setQueuedImageCount(imageQueueRef.current.length)
+  }
+
+  function isPageQueuedOrActive(modeToCheck: ProjectMode, pageId: string): boolean {
+    if (imageQueueRef.current.some((task) => task.mode === modeToCheck && task.page.id === pageId)) return true
+    return Array.from(activeImageTasksRef.current.values()).some((task) => task.mode === modeToCheck && task.page.id === pageId)
+  }
+
+  function clearImagePoolTimer() {
+    if (imagePoolTimerRef.current === null) return
+    window.clearTimeout(imagePoolTimerRef.current)
+    imagePoolTimerRef.current = null
+  }
+
+  function scheduleImagePool(delay: number) {
+    if (imagePoolTimerRef.current !== null) return
+    imagePoolTimerRef.current = window.setTimeout(() => {
+      imagePoolTimerRef.current = null
+      drainImagePool()
+    }, delay)
+  }
+
+  function resolveImageReference(referenceImage: ImageReferenceResolver): string | undefined {
+    return typeof referenceImage === 'function' ? referenceImage() : referenceImage
+  }
+
+  async function runImageQueueTask(task: ImageQueueTask) {
+    try {
+      const image = task.controller.signal.aborted
+        ? null
+        : await generatePageImage(task.project, task.page, resolveImageReference(task.referenceImage), task.controller.signal)
+      task.resolve(image)
+    } finally {
+      activeImageTasksRef.current.delete(task.id)
+      syncImagePoolState()
+      drainImagePool()
+    }
+  }
+
+  function drainImagePool() {
+    if (activeImageTasksRef.current.size >= IMAGE_POOL_SIZE || imageQueueRef.current.length === 0) {
+      syncImagePoolState()
+      return
+    }
+
+    const elapsed = Date.now() - lastImageStartAtRef.current
+    const waitMs = lastImageStartAtRef.current === 0 ? 0 : Math.max(0, IMAGE_REQUEST_GAP_MS - elapsed)
+    if (waitMs > 0) {
+      scheduleImagePool(waitMs)
+      syncImagePoolState()
+      return
+    }
+
+    const task = imageQueueRef.current.shift()
+    if (!task) {
+      syncImagePoolState()
+      return
+    }
+
+    lastImageStartAtRef.current = Date.now()
+    activeImageTasksRef.current.set(task.id, task)
+    syncImagePoolState()
+    void runImageQueueTask(task)
+
+    if (imageQueueRef.current.length > 0 && activeImageTasksRef.current.size < IMAGE_POOL_SIZE) {
+      scheduleImagePool(IMAGE_REQUEST_GAP_MS)
+    }
+  }
+
+  function enqueueImageGeneration(projectToQueue: XhsProject, page: XhsPage, referenceImage?: ImageReferenceResolver): Promise<string | null> {
+    const cleanProject = {
+      ...projectToQueue,
+      config: normalizeConfig(projectToQueue.config),
+    }
+    const operationMode = cleanProject.config.mode
+
+    if (isPageQueuedOrActive(operationMode, page.id)) return Promise.resolve(null)
+
+    setPageStatusForMode(operationMode, (current) => ({ ...current, [page.id]: 'loading' }))
+    setPageErrorsForMode(operationMode, (current) => ({ ...current, [page.id]: '' }))
+
+    return new Promise((resolve) => {
+      imageQueueRef.current.push({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        mode: operationMode,
+        project: cleanProject,
+        page,
+        referenceImage,
+        controller: new AbortController(),
+        resolve,
+      })
+      syncImagePoolState()
+      drainImagePool()
+    })
+  }
+
+  function queueProjectImages(targetProject = project) {
+    if (!targetProject) return []
+
+    const cleanProject = {
+      ...targetProject,
+      config: normalizeConfig(targetProject.config),
+    }
+    const operationMode = cleanProject.config.mode
+    const productReference = operationMode === 'taobao' ? workspaceRef.current[operationMode].referenceImage : ''
+    const cover = cleanProject.pages[0]
+
+    setError('')
+    return cleanProject.pages.map((page) => {
+      const reference = () => {
+        if (page.id === cover?.id) return productReference || undefined
+        const coverImage = cover ? imagesRef.current[operationMode]?.[cover.id] : undefined
+        return operationMode === 'taobao'
+          ? productReference || (cleanProject.config.useCoverReference ? coverImage : undefined)
+          : cleanProject.config.useCoverReference ? coverImage : undefined
+      }
+      return enqueueImageGeneration(cleanProject, page, reference)
+    })
+  }
+
+  function stopImagePool() {
+    clearImagePoolTimer()
+
+    const queuedTasks = imageQueueRef.current
+    imageQueueRef.current = []
+    for (const task of queuedTasks) {
+      task.controller.abort()
+      setPageStatusForMode(task.mode, (current) => ({ ...current, [task.page.id]: 'idle' }))
+      task.resolve(null)
+    }
+
+    for (const task of activeImageTasksRef.current.values()) {
+      task.controller.abort()
+    }
+    resetLoadingStatuses('xhs')
+    resetLoadingStatuses('taobao')
+    syncImagePoolState()
+  }
+
   function stopGeneration() {
     const generation = activeGenerationRef.current
-    if (!generation) return
-    generation.controller.abort()
-    activeGenerationRef.current = null
-    resetLoadingStatuses(generation.mode)
+    if (!generation && activeImageTasksRef.current.size === 0 && imageQueueRef.current.length === 0) return
+    if (generation) {
+      generation.controller.abort()
+      activeGenerationRef.current = null
+      resetLoadingStatuses(generation.mode)
+    }
+    stopImagePool()
     setBusy(null)
     setError('已停止生成')
   }
@@ -818,54 +991,12 @@ export default function App() {
     }
   }
 
-  async function generateAllImages(targetProject = project, options: { signal?: AbortSignal; manageBusy?: boolean } = {}) {
-    if (!targetProject) return
-
-    const cleanProject = {
-      ...targetProject,
-      config: normalizeConfig(targetProject.config),
-    }
-    const operationMode = cleanProject.config.mode
-    const controller = options.manageBusy === false ? null : beginGeneration('images', operationMode)
-    const signal = options.signal ?? controller?.signal
-    setError('')
-
-    const productReference = operationMode === 'taobao' ? workspaceRef.current[operationMode].referenceImage : ''
-    const nextImages: Record<string, string> = {}
-    try {
-      const cover = cleanProject.pages[0]
-      let coverImage = ''
-      if (cover) {
-        if (signal?.aborted) return
-        const result = await generatePageImage(cleanProject, cover, productReference || undefined, signal)
-        if (result) {
-          coverImage = result
-          nextImages[cover.id] = result
-        }
-      }
-
-      for (const page of cleanProject.pages.slice(1)) {
-        if (signal?.aborted) return
-        const reference = operationMode === 'taobao'
-          ? productReference || (cleanProject.config.useCoverReference ? coverImage : undefined)
-          : cleanProject.config.useCoverReference ? coverImage : undefined
-        const result = await generatePageImage(cleanProject, page, reference, signal)
-        if (result) nextImages[page.id] = result
-      }
-
-      if (signal?.aborted) return
-      await persistProjectSnapshot(cleanProject)
-    } finally {
-      if (controller) finishGeneration(controller)
-    }
-  }
-
   async function generateEverything() {
     const operationMode = mode
     const controller = beginGeneration('all', operationMode)
     try {
       const created = await composeCurrentProject(controller.signal, operationMode)
-      if (created && !controller.signal.aborted) await generateAllImages(created, { signal: controller.signal, manageBusy: false })
+      if (created && !controller.signal.aborted) queueProjectImages(created)
     } finally {
       finishGeneration(controller)
     }
@@ -880,7 +1011,7 @@ export default function App() {
   }
 
   async function requestGeneration(action: PendingSettingsAction) {
-    if (busy) return
+    if (isGenerationLocked) return
     if (!topic.trim()) {
       setError('请输入选题')
       return
@@ -895,14 +1026,14 @@ export default function App() {
 
   async function autoFillAndContinue() {
     const action = settingsPromptAction
-    if (!action || busy) return
+    if (!action || isGenerationLocked) return
     const filled = await fillSettings()
     if (filled) await runGenerationAction(action)
   }
 
   async function continueWithoutSettings() {
     const action = settingsPromptAction
-    if (!action || busy) return
+    if (!action || isGenerationLocked) return
     setSettingsPromptAction(null)
     patchWorkspace(mode, { settingsReady: true })
     await runGenerationAction(action)
@@ -1011,22 +1142,20 @@ export default function App() {
     const operationMode = saved.project.config.mode
     const workspace = workspaceRef.current[operationMode]
     const cover = saved.project.pages[0]
-    const reference = operationMode === 'taobao'
-      ? workspace.referenceImage || (saved.project.config.useCoverReference && saved.page.index > 0 && cover ? workspace.images[cover.id] : undefined)
-      : saved.project.config.useCoverReference && saved.page.index > 0 && cover
-        ? workspace.images[cover.id]
-        : undefined
-    const controller = beginGeneration('page', operationMode)
-    try {
-      await generatePageImage(saved.project, saved.page, reference, controller.signal)
-    } finally {
-      finishGeneration(controller)
+    const reference = () => {
+      const coverImage = cover ? imagesRef.current[operationMode]?.[cover.id] : undefined
+      return operationMode === 'taobao'
+        ? workspace.referenceImage || (saved.project.config.useCoverReference && saved.page.index > 0 ? coverImage : undefined)
+        : saved.project.config.useCoverReference && saved.page.index > 0
+          ? coverImage
+          : undefined
     }
+    void enqueueImageGeneration(saved.project, saved.page, reference)
   }
 
   async function generateAllFromCurrentProject() {
     const saved = saveSelectedDraft({ clearImage: false })
-    await generateAllImages(saved?.project ?? project)
+    queueProjectImages(saved?.project ?? project)
   }
 
   return (
@@ -1247,7 +1376,7 @@ export default function App() {
           )}
 
           <div className="auto-settings">
-            <button className="secondary-button full" type="button" onClick={() => void fillSettings()} disabled={Boolean(busy)}>
+            <button className="secondary-button full" type="button" onClick={() => void fillSettings()} disabled={isGenerationLocked}>
               {busy === 'settings' ? <Loader2 className="spin" size={18} /> : <WandSparkles size={18} />}
               {mode === 'taobao' ? '自动填写买家定位' : '自动填写定位'}
             </button>
@@ -1295,11 +1424,11 @@ export default function App() {
             <div className="settings-reminder" role="alert">
               <p>当前还是默认{settingsLabel()}。建议先自动填写，再生成。</p>
               <div>
-                <button type="button" onClick={() => void autoFillAndContinue()} disabled={Boolean(busy)}>
+                <button type="button" onClick={() => void autoFillAndContinue()} disabled={isGenerationLocked}>
                   {busy === 'settings' ? <Loader2 className="spin" size={16} /> : <WandSparkles size={16} />}
                   自动填写并继续
                 </button>
-                <button type="button" onClick={() => void continueWithoutSettings()} disabled={Boolean(busy)}>
+                <button type="button" onClick={() => void continueWithoutSettings()} disabled={isGenerationLocked}>
                   继续生成
                 </button>
               </div>
@@ -1309,24 +1438,24 @@ export default function App() {
           {error && <div className="error-box" role="alert">{error}</div>}
 
           <div className="button-row">
-            <button className="secondary-button" type="button" onClick={() => void requestGeneration('compose')} disabled={Boolean(busy)}>
+            <button className="secondary-button" type="button" onClick={() => void requestGeneration('compose')} disabled={isGenerationLocked}>
               {busy === 'compose' ? <Loader2 className="spin" size={18} /> : <RefreshCw size={18} />}
               生成方案
             </button>
-            <button className="primary-button" type="button" onClick={() => void requestGeneration('all')} disabled={Boolean(busy)}>
-              {busy ? <Loader2 className="spin" size={18} /> : <Sparkles size={18} />}
+            <button className="primary-button" type="button" onClick={() => void requestGeneration('all')} disabled={isGenerationLocked}>
+              {busy === 'all' || isImageBusy ? <Loader2 className="spin" size={18} /> : <Sparkles size={18} />}
               生成整套
             </button>
-            <button className="reset-button" type="button" onClick={resetCurrentProject} disabled={Boolean(busy) || (!project && generatedCount === 0)}>
+            <button className="reset-button" type="button" onClick={resetCurrentProject} disabled={isGenerationLocked || (!project && generatedCount === 0)}>
               <Trash2 size={18} />
               重置内容
             </button>
-            {busy && busy !== 'settings' && (
+            {(busy && busy !== 'settings') || isImageBusy ? (
               <button className="stop-button" type="button" onClick={stopGeneration}>
                 <CircleStop size={18} />
                 停止
               </button>
-            )}
+            ) : null}
           </div>
         </section>
 
@@ -1430,8 +1559,8 @@ export default function App() {
                       <Save size={17} />
                       保存
                     </button>
-                    <button type="button" onClick={generateSelectedPage} disabled={Boolean(busy)}>
-                      {busy === 'page' ? <Loader2 className="spin" size={17} /> : <RefreshCw size={17} />}
+                    <button type="button" onClick={generateSelectedPage} disabled={Boolean(busy) || pageStatus[selectedPage.id] === 'loading'}>
+                      {pageStatus[selectedPage.id] === 'loading' ? <Loader2 className="spin" size={17} /> : <RefreshCw size={17} />}
                       生成当前页
                     </button>
                     <button type="button" onClick={() => copyText(pageDraft.imagePrompt)}>
@@ -1492,8 +1621,8 @@ export default function App() {
                 </div>
               </div>
 
-              <button className="primary-button full" type="button" onClick={generateAllFromCurrentProject} disabled={!project || Boolean(busy)}>
-                {busy === 'images' ? <Loader2 className="spin" size={18} /> : <ImageIcon size={18} />}
+              <button className="primary-button full" type="button" onClick={generateAllFromCurrentProject} disabled={!project || isGenerationLocked}>
+                {isImageBusy ? <Loader2 className="spin" size={18} /> : <ImageIcon size={18} />}
                 生成整套图片
               </button>
             </div>
