@@ -926,6 +926,24 @@ export default function App() {
     setHistory([])
   }
 
+  function resetCurrentProject() {
+    if (!project && generatedCount === 0) return
+    if (!window.confirm('清空当前方案、页面内容和已生成图片？')) return
+
+    patchWorkspace(mode, {
+      project: null,
+      images: {},
+      pageStatus: {},
+      pageErrors: {},
+      selectedPageId: '',
+    })
+    setPageDraft(null)
+    setPreviewPageId('')
+    setIsPreviewActualSize(false)
+    setSettingsPromptAction(null)
+    setError('')
+  }
+
   function exportCurrent() {
     const saved = saveSelectedDraft({ clearImage: false })
     const currentProject = saved?.project ?? project
@@ -1288,6 +1306,10 @@ export default function App() {
             <button className="primary-button" type="button" onClick={() => void requestGeneration('all')} disabled={Boolean(busy)}>
               {busy ? <Loader2 className="spin" size={18} /> : <Sparkles size={18} />}
               生成整套
+            </button>
+            <button className="reset-button" type="button" onClick={resetCurrentProject} disabled={Boolean(busy) || (!project && generatedCount === 0)}>
+              <Trash2 size={18} />
+              重置内容
             </button>
             {busy && busy !== 'settings' && (
               <button className="stop-button" type="button" onClick={stopGeneration}>

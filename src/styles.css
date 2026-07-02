@@ -403,6 +403,7 @@ button:disabled {
 
 .primary-button,
 .secondary-button,
+.reset-button,
 .detail-actions button,
 .mini-heading button {
   display: inline-flex;
@@ -438,6 +439,18 @@ button:disabled {
 .secondary-button.full {
   width: 100%;
   flex: unset;
+}
+
+.reset-button {
+  flex: 0 0 100%;
+  border: 1px solid rgba(180, 35, 24, 0.2);
+  background: #fff7f5;
+  color: var(--danger);
+  padding: 10px 14px;
+}
+
+.reset-button:hover:not(:disabled) {
+  background: #fff0ed;
 }
 
 .stop-button {
