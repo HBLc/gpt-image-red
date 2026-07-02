@@ -407,7 +407,7 @@ async function callImageApi(args: {
       formData.append('size', config.size)
       formData.append('quality', config.quality)
       formData.append('output_format', config.outputFormat)
-      formData.append('moderation', config.moderation)
+      formData.append('moderation', 'low')
 
       const file = dataUrlToFile(referenceImage)
       formData.append('image[]', file.blob, file.filename)
