@@ -526,8 +526,10 @@ export default function App() {
     patchWorkspace(normalized.mode, { config: normalized })
   }
 
-  function setImagesForMode(targetMode: ProjectMode, updater: (current: Record<string, string>) => Record<string, string>) {
-    patchWorkspace(targetMode, { images: updater(workspaceRef.current[targetMode].images) })
+  function setImagesForMode(targetMode: ProjectMode, updater: (current: Record<string, string>) => Record<string, string>): Record<string, string> {
+    const nextImages = updater(workspaceRef.current[targetMode].images)
+    patchWorkspace(targetMode, { images: nextImages })
+    return nextImages
   }
 
   function setPageStatusForMode(targetMode: ProjectMode, updater: (current: Record<string, PageStatus>) => Record<string, PageStatus>) {
@@ -726,13 +728,13 @@ export default function App() {
     })
   }
 
-  async function persistProjectSnapshot(targetProject: XhsProject): Promise<void> {
+  async function persistProjectSnapshot(targetProject: XhsProject, imageSnapshot?: Record<string, string>): Promise<void> {
     const cleanProject = {
       ...targetProject,
       config: normalizeConfig(targetProject.config),
     }
     const operationMode = cleanProject.config.mode
-    const saved = await rememberProject(toSavedProject(cleanProject, workspaceRef.current[operationMode].images))
+    const saved = await rememberProject(toSavedProject(cleanProject, imageSnapshot ?? workspaceRef.current[operationMode].images))
     setHistory(saved)
   }
 
@@ -794,9 +796,9 @@ export default function App() {
     try {
       const response = await generateImage({ project: cleanProject, page, referenceImage }, { signal })
       if (signal?.aborted) return null
-      setImagesForMode(operationMode, (current) => ({ ...current, [page.id]: response.image }))
+      const nextImages = setImagesForMode(operationMode, (current) => ({ ...current, [page.id]: response.image }))
       setPageStatusForMode(operationMode, (current) => ({ ...current, [page.id]: 'done' }))
-      await persistProjectSnapshot(cleanProject)
+      await persistProjectSnapshot(cleanProject, nextImages)
       return response.image
     } catch (err) {
       if (signal?.aborted || isAbortError(err)) {
@@ -990,7 +992,7 @@ export default function App() {
   }
 
   async function saveSelectedDraftToHistory() {
-    const saved = saveSelectedDraft()
+    const saved = saveSelectedDraft({ clearImage: false })
     if (!saved) return
     await persistProjectSnapshot(saved.project)
   }
