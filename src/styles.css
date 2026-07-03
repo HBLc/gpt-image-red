@@ -1224,6 +1224,28 @@ button:disabled {
   padding: 0;
 }
 
+.download-action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 106px;
+  min-height: 44px;
+  border: 1px solid rgba(201, 56, 43, 0.24);
+  border-radius: 8px;
+  background: var(--primary);
+  color: #fff;
+  padding: 9px 12px;
+  font-size: 13px;
+  font-weight: 900;
+  white-space: nowrap;
+  box-shadow: 0 10px 24px rgba(201, 56, 43, 0.16);
+}
+
+.download-action-button:hover:not(:disabled) {
+  background: var(--primary-strong);
+}
+
 .icon-button.danger {
   color: var(--danger);
 }

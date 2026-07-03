@@ -1,8 +1,8 @@
-# Red Image Studio
+# Berlin Image Studio
 
 中文 | [English](#english)
 
-Red Image Studio 是一个本地运行的 AI 图片工作台，用 `gpt-image-2` 生成小红书图文套图和淘宝商品宣传图。
+Berlin Image Studio 是一个本地运行的 AI 图片工作台，用 `gpt-image-2` 生成小红书图文套图和淘宝商品宣传图。
 
 项目参考了两个方向：
 
@@ -27,7 +27,7 @@ Red Image Studio 是一个本地运行的 AI 图片工作台，用 `gpt-image-2`
 - 停止生成：可中途停止方案生成或图片队列。
 - 历史记录：小红书、淘宝、单图三种模式分开保存，可在页面里设置每个模式最多保存几条。
 - 图片预览：点击图片可放大查看，并左右切换。
-- 导出 ZIP：导出项目 JSON、发布文案、全部提示词和已生成图片。
+- 下载图文 ZIP：导出项目 JSON、发布文案、全部提示词和已生成图片。
 - 页面配置 API：可在界面里配置 API Key、API URL、文本模型、图片模型和图片超时时间。
 - Mock 模式：没有配置 `OPENAI_API_KEY` 时会返回模拟方案和 SVG 图片，方便先调界面。
 
@@ -88,19 +88,19 @@ http://localhost:8787
 构建镜像：
 
 ```bash
-docker build -t gpt-image-red:local .
+docker build -t berlin-image-studio:local .
 ```
 
 使用 `.env` 启动：
 
 ```bash
-docker run -d --name gpt-image-red -p 8787:8787 --env-file .env gpt-image-red:local
+docker run -d --name berlin-image-studio -p 8787:8787 --env-file .env berlin-image-studio:local
 ```
 
 如果本机 8787 已被占用，可以映射到其他端口：
 
 ```bash
-docker run -d --name gpt-image-red -p 8788:8787 --env-file .env gpt-image-red:local
+docker run -d --name berlin-image-studio -p 8788:8787 --env-file .env berlin-image-studio:local
 ```
 
 访问：
@@ -228,7 +228,7 @@ MIT。见 [LICENSE](./LICENSE)。
 
 ## English
 
-Red Image Studio is a local AI image workspace for creating Xiaohongshu carousel posts and Taobao product promotion images with `gpt-image-2`.
+Berlin Image Studio is a local AI image workspace for creating Xiaohongshu carousel posts and Taobao product promotion images with `gpt-image-2`.
 
 It is inspired by two projects:
 
@@ -253,7 +253,7 @@ This project is a fresh implementation. It does not copy source code or prompt f
 - Stop generation: stop plan generation or the image queue midway.
 - History: Xiaohongshu, Taobao, and single-image records are stored separately, with a configurable per-mode limit.
 - Preview: click an image to view it larger and navigate left/right.
-- ZIP export: export project JSON, caption, prompts, and generated images.
+- Download carousel ZIP: export project JSON, caption, prompts, and generated images.
 - In-page API configuration: configure API Key, API URL, text model, image model, and image timeout from the UI.
 - Mock mode: when `OPENAI_API_KEY` is not configured, the app returns mock plans and SVG images for UI testing.
 
@@ -314,19 +314,19 @@ http://localhost:8787
 Build the image:
 
 ```bash
-docker build -t gpt-image-red:local .
+docker build -t berlin-image-studio:local .
 ```
 
 Run with `.env`:
 
 ```bash
-docker run -d --name gpt-image-red -p 8787:8787 --env-file .env gpt-image-red:local
+docker run -d --name berlin-image-studio -p 8787:8787 --env-file .env berlin-image-studio:local
 ```
 
 If port 8787 is already in use, map it to another local port:
 
 ```bash
-docker run -d --name gpt-image-red -p 8788:8787 --env-file .env gpt-image-red:local
+docker run -d --name berlin-image-studio -p 8788:8787 --env-file .env berlin-image-studio:local
 ```
 
 Open:

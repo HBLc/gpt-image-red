@@ -7,6 +7,7 @@ FROM deps AS build
 COPY index.html tsconfig.json vite.config.ts ./
 COPY src ./src
 COPY server ./server
+COPY public ./public
 RUN npm run build
 
 FROM node:24-alpine AS runner

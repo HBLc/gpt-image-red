@@ -1505,7 +1505,7 @@ export default function App() {
     if (!currentProject) return
     const operationMode = currentProject.config.mode ?? mode
     const blob = exportProjectZip(currentProject, imagesRef.current[operationMode] ?? workspaceRef.current[operationMode].images)
-    downloadBlob(blob, `${currentProject.topic.slice(0, 18) || 'red-image-studio'}.zip`)
+    downloadBlob(blob, `${currentProject.topic.slice(0, 18) || 'berlin-image-studio'}.zip`)
   }
 
   function saveSelectedDraft(options: { clearImage?: boolean } = {}) {
@@ -1609,8 +1609,8 @@ export default function App() {
             <Sparkles size={22} />
           </div>
           <div>
-            <h1>Red Image Studio</h1>
-            <p>小红书 / 淘宝图片工作台</p>
+            <h1>Berlin Image Studio</h1>
+            <p>小红书 / 淘宝 / 文生图工作台</p>
           </div>
         </div>
         <div className="topbar-actions">
@@ -2264,12 +2264,14 @@ export default function App() {
               <h2>{studioMode === 'single' ? '详情' : '发布'}</h2>
             </div>
             {studioMode === 'single' ? (
-              <button className="icon-button" type="button" onClick={() => selectedSingleImage && downloadDataUrl(selectedSingleImage.image, `single-${selectedSingleImage.id}.${selectedSingleImage.outputFormat}`)} disabled={!selectedSingleImage} aria-label="下载单图">
+              <button className="download-action-button" type="button" onClick={() => selectedSingleImage && downloadDataUrl(selectedSingleImage.image, `single-${selectedSingleImage.id}.${selectedSingleImage.outputFormat}`)} disabled={!selectedSingleImage}>
                 <Download size={18} />
+                下载图片
               </button>
             ) : (
-              <button className="icon-button" type="button" onClick={exportCurrent} disabled={!project} aria-label="导出 ZIP">
+              <button className="download-action-button" type="button" onClick={exportCurrent} disabled={!project}>
                 <Download size={18} />
+                下载图文
               </button>
             )}
           </div>
