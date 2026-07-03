@@ -164,6 +164,7 @@ npm run preview
 - “生成图片”只生成当前选中的页面。
 - “调整图片”只在当前页已有图片时显示，会调用图片编辑接口。
 - “生成整套图片”会把全部页面加入队列。
+- 淘宝模式上传参考图后，生成页面会把参考图传给 `images/edits`。
 - 队列最多同时运行 2 个图片请求。
 - 两个请求的启动时间至少间隔 5 秒。
 - 完成顺序不保证和页面顺序一致，因为不同图片请求耗时不同。
@@ -384,6 +385,7 @@ Preview the production build.
 - "Generate Image" only generates the selected page.
 - "Adjust Image" appears only when the selected page already has an image, and it calls the image edit API.
 - "Generate Full Set" queues all pages.
+- In Taobao mode, an uploaded reference image is sent to `images/edits` for generated pages.
 - The queue runs at most 2 image requests at the same time.
 - Request starts are spaced by at least 5 seconds.
 - Completion order is not guaranteed, because image requests can take different amounts of time.

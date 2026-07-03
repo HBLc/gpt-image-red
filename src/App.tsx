@@ -730,6 +730,15 @@ export default function App() {
     })
   }
 
+  function getUploadedReferenceForProject(projectToUse: XhsProject): string | undefined {
+    const operationMode = projectToUse.config.mode
+    if (operationMode !== 'taobao') return undefined
+    const workspaceReference = activeModeRef.current === operationMode
+      ? referenceImage
+      : workspaceRef.current[operationMode]?.referenceImage
+    return workspaceReference || undefined
+  }
+
   function queueProjectImages(targetProject = project) {
     if (!targetProject) return []
 
@@ -737,9 +746,12 @@ export default function App() {
       ...targetProject,
       config: normalizeConfig(targetProject.config),
     }
+    const uploadedReference = getUploadedReferenceForProject(cleanProject)
 
     setError('')
-    return cleanProject.pages.map((page) => enqueueImageGeneration(cleanProject, page))
+    return cleanProject.pages.map((page) => enqueueImageGeneration(cleanProject, page, {
+      referenceImage: uploadedReference,
+    }))
   }
 
   function stopImagePool() {
@@ -1180,7 +1192,9 @@ export default function App() {
   function generateSelectedImage() {
     const saved = saveSelectedDraft({ clearImage: false })
     if (!saved) return
-    void enqueueImageGeneration(saved.project, saved.page)
+    void enqueueImageGeneration(saved.project, saved.page, {
+      referenceImage: getUploadedReferenceForProject(saved.project),
+    })
   }
 
   function openAdjustImageDialog() {
