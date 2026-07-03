@@ -40,13 +40,13 @@ const XHS_IMAGE_FORMAT = 'png'
 const XHS_DEFAULT_TOPIC = '给自由职业者做一套高效工作流图文'
 const TAOBAO_DEFAULT_TOPIC = '便携式咖啡杯，主打不漏水、通勤好看、送礼体面'
 const SINGLE_DEFAULT_PROMPT = '一只透明玻璃杯放在浅色桌面上，柔和自然光，干净产品摄影，背景简洁'
+const SINGLE_IMAGE_SIZE = '1024x1024'
+const SINGLE_IMAGE_QUALITY = 'medium'
+const SINGLE_IMAGE_FORMAT = 'png'
 const XHS_DEFAULT_AUDIENCE = '想提升内容质感的新手创作者'
 const TAOBAO_DEFAULT_AUDIENCE = '有明确购买需求的淘宝用户'
 const IMAGE_POOL_SIZE = 2
 const IMAGE_REQUEST_GAP_MS = 5000
-const singleImageSizes = ['1024x1024', '1024x1536', '1536x1024'] as const
-const singleImageQualities = ['low', 'medium', 'high'] as const
-const singleImageFormats = ['png', 'jpeg', 'webp'] as const
 const emptyEnvConfig: EnvConfig = {
   openaiApiKey: '',
   openaiBaseUrl: 'https://api.openai.com/v1',
@@ -71,7 +71,6 @@ const defaultConfig: StudioConfig = {
 type PageStatus = 'idle' | 'queued' | 'loading' | 'done' | 'error'
 type StudioMode = ProjectMode | 'single'
 type SingleImageStatus = 'idle' | 'loading' | 'done' | 'error'
-type SingleImageSize = typeof singleImageSizes[number]
 type BusyState = 'settings' | 'compose' | 'all' | null
 type PendingSettingsAction = 'compose' | 'all'
 type ImageReferenceResolver = string | (() => string | undefined) | undefined
@@ -207,9 +206,9 @@ function readImageFile(file: File): Promise<string> {
 
 function createSingleImageProject(args: {
   prompt: string
-  size: SingleImageSize
-  quality: typeof singleImageQualities[number]
-  outputFormat: typeof singleImageFormats[number]
+  size: string
+  quality: typeof SINGLE_IMAGE_QUALITY
+  outputFormat: typeof SINGLE_IMAGE_FORMAT
 }): { project: XhsProject; page: XhsPage } {
   const now = Date.now()
   const page: XhsPage = {
@@ -516,9 +515,6 @@ export default function App() {
   const [singleStatus, setSingleStatus] = useState<SingleImageStatus>('idle')
   const [singleError, setSingleError] = useState('')
   const [singleEditInstruction, setSingleEditInstruction] = useState('')
-  const [singleSize, setSingleSize] = useState<SingleImageSize>('1024x1024')
-  const [singleQuality, setSingleQuality] = useState<typeof singleImageQualities[number]>('medium')
-  const [singleOutputFormat, setSingleOutputFormat] = useState<typeof singleImageFormats[number]>('png')
   const singleImageControllerRef = useRef<AbortController | null>(null)
   const workspaceRef = useRef<Record<ProjectMode, ModeWorkspace>>({
     xhs: createModeWorkspace('xhs'),
@@ -1105,9 +1101,9 @@ export default function App() {
     prompt: string
     editInstruction?: string
     referenceName?: string
-    size: SingleImageSize
-    quality: typeof singleImageQualities[number]
-    outputFormat: typeof singleImageFormats[number]
+    size: string
+    quality: typeof SINGLE_IMAGE_QUALITY
+    outputFormat: typeof SINGLE_IMAGE_FORMAT
     mode: SavedSingleImage['mode']
   }): SavedSingleImage {
     return {
@@ -1137,9 +1133,9 @@ export default function App() {
     singleImageControllerRef.current = controller
     setSingleStatus('loading')
     setSingleError('')
-    const requestSize = singleSize
-    const requestQuality = singleQuality
-    const requestOutputFormat = singleOutputFormat
+    const requestSize = SINGLE_IMAGE_SIZE
+    const requestQuality = SINGLE_IMAGE_QUALITY
+    const requestOutputFormat = SINGLE_IMAGE_FORMAT
     const requestReferenceImage = singleReferenceImage
     const requestReferenceName = singleReferenceImageName
 
@@ -1198,9 +1194,9 @@ export default function App() {
     singleImageControllerRef.current = controller
     setSingleStatus('loading')
     setSingleError('')
-    const requestSize = singleSize
-    const requestQuality = singleQuality
-    const requestOutputFormat = singleOutputFormat
+    const requestSize = SINGLE_IMAGE_SIZE
+    const requestQuality = SINGLE_IMAGE_QUALITY
+    const requestOutputFormat = SINGLE_IMAGE_FORMAT
 
     const { project: singleProject, page } = createSingleImageProject({
       prompt: selectedSingleImage.prompt,
@@ -1917,27 +1913,6 @@ export default function App() {
                 )}
               </div>
 
-              <div className="single-param-grid">
-                <label className="field-block">
-                  <span>尺寸</span>
-                  <select value={singleSize} onChange={(event) => setSingleSize(event.target.value as SingleImageSize)}>
-                    {singleImageSizes.map((item) => <option key={item} value={item}>{item}</option>)}
-                  </select>
-                </label>
-                <label className="field-block">
-                  <span>质量</span>
-                  <select value={singleQuality} onChange={(event) => setSingleQuality(event.target.value as typeof singleImageQualities[number])}>
-                    {singleImageQualities.map((item) => <option key={item} value={item}>{item}</option>)}
-                  </select>
-                </label>
-                <label className="field-block">
-                  <span>格式</span>
-                  <select value={singleOutputFormat} onChange={(event) => setSingleOutputFormat(event.target.value as typeof singleImageFormats[number])}>
-                    {singleImageFormats.map((item) => <option key={item} value={item}>{item}</option>)}
-                  </select>
-                </label>
-              </div>
-
               {singleError && <div className="error-box" role="alert">{singleError}</div>}
 
               <div className="button-row">
@@ -2117,7 +2092,7 @@ export default function App() {
                   </button>
                   <div className="single-hero-meta">
                     <span>{selectedSingleImage.mode === 'edit' ? '调整结果' : selectedSingleImage.referenceName ? '参考图生成' : '文生图'}</span>
-                    <span>{selectedSingleImage.size} / {selectedSingleImage.quality} / {selectedSingleImage.outputFormat}</span>
+                    {selectedSingleImage.referenceName && <span>{selectedSingleImage.referenceName}</span>}
                   </div>
                 </div>
               ) : isSingleBusy ? (
@@ -2325,26 +2300,14 @@ export default function App() {
                   </div>
                 )}
 
-                <dl className="setting-summary">
-                  <div>
-                    <dt>尺寸</dt>
-                    <dd>{selectedSingleImage.size}</dd>
-                  </div>
-                  <div>
-                    <dt>质量</dt>
-                    <dd>{selectedSingleImage.quality}</dd>
-                  </div>
-                  <div>
-                    <dt>格式</dt>
-                    <dd>{selectedSingleImage.outputFormat}</dd>
-                  </div>
-                  {selectedSingleImage.referenceName && (
+                {selectedSingleImage.referenceName && (
+                  <dl className="setting-summary">
                     <div>
                       <dt>参考</dt>
                       <dd>{selectedSingleImage.referenceName}</dd>
                     </div>
-                  )}
-                </dl>
+                  </dl>
+                )}
 
                 <label className="field-block">
                   <span>调整需求</span>
@@ -2428,9 +2391,10 @@ export default function App() {
                 min={1}
                 max={30}
                 value={historyLimit}
+                aria-label="每个模式最多保存条数"
                 onChange={(event) => void changeHistoryLimit(Number(event.target.value))}
               />
-              <span>条/模式</span>
+              <span>条</span>
             </label>
             <div className="history-list">
               {studioMode === 'single' ? (

@@ -298,7 +298,7 @@ textarea:focus-visible {
 
 .mode-switch {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 8px;
   margin-bottom: 14px;
 }
@@ -306,7 +306,7 @@ textarea:focus-visible {
 .mode-switch button {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 7px;
   min-width: 0;
   min-height: 48px;
@@ -317,7 +317,8 @@ textarea:focus-visible {
   font-size: 13px;
   font-weight: 900;
   line-height: 1.25;
-  text-align: center;
+  text-align: left;
+  white-space: nowrap;
 }
 
 .mode-switch button.active {
@@ -590,12 +591,6 @@ button:disabled {
 .single-composer .field-block,
 .single-detail-stack .field-block {
   margin-bottom: 0;
-}
-
-.single-param-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
 }
 
 .single-workspace {
@@ -1313,19 +1308,24 @@ button:disabled {
 }
 
 .history-limit-row {
-  display: grid;
-  grid-template-columns: auto 72px 1fr;
+  display: inline-grid;
+  grid-template-columns: auto 46px auto;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   margin-bottom: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  padding: 4px 6px;
   color: var(--muted);
   font-size: 12px;
   font-weight: 900;
 }
 
 .history-limit-row input {
-  min-height: 44px;
-  padding: 8px 10px;
+  min-height: 32px;
+  border-radius: 6px;
+  padding: 4px 6px;
   text-align: center;
 }
 
@@ -1429,7 +1429,6 @@ button:disabled {
 
   .field-grid,
   .field-grid.three,
-  .single-param-grid,
   .config-grid,
   .detail-band {
     grid-template-columns: 1fr;
@@ -1497,10 +1496,6 @@ button:disabled {
   .button-row,
   .toggle-row {
     flex-direction: column;
-  }
-
-  .mode-switch {
-    grid-template-columns: 1fr;
   }
 
   .toggle-row select {
