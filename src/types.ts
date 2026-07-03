@@ -119,3 +119,16 @@ export type SaveEnvConfigRequest = EnvConfig
 export interface SavedProject extends XhsProject {
   images: Record<string, string>
 }
+
+export interface SavedSingleImage {
+  id: string
+  image: string
+  prompt: string
+  editInstruction?: string
+  referenceName?: string
+  createdAt: string
+  size: string
+  quality: ImageQuality
+  outputFormat: ImageFormat
+  mode: 'generate' | 'edit'
+}

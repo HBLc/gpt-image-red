@@ -28,8 +28,8 @@ import {
 } from 'lucide-react'
 import { composeProject, generateImage, getEnvConfig, getHealth, saveEnvConfig, suggestSettings } from './api'
 import { exportProjectZip, toSavedProject } from './exportProject'
-import { clearHistory, loadHistory, rememberProject, saveHistory } from './storage'
-import type { EnvConfig, Field, HealthResponse, ProjectMode, SavedProject, StudioConfig, VisualStyle, XhsPage, XhsProject } from './types'
+import { clearHistory, clearSingleHistory, getHistoryLimit, loadHistory, loadSingleHistory, rememberProject, rememberSingleImage, saveHistory, saveSingleHistory, updateHistoryLimit } from './storage'
+import type { EnvConfig, Field, HealthResponse, ProjectMode, SavedProject, SavedSingleImage, StudioConfig, VisualStyle, XhsPage, XhsProject } from './types'
 
 const fields: Field[] = ['生活方式', '美妆护肤', '职场效率', '学习成长', '旅行探店', '美食烘焙', '运动健康', '母婴家庭', '家居收纳', '数码工具']
 const styles: VisualStyle[] = ['清爽实用', '杂志质感', '手账拼贴', '专业干货', '温暖日常', '科技极简']
@@ -106,19 +106,6 @@ interface ImageQueueTask {
   editInstruction?: string
   controller: AbortController
   resolve: (image: string | null) => void
-}
-
-interface SingleImageResult {
-  id: string
-  image: string
-  prompt: string
-  editInstruction?: string
-  referenceName?: string
-  createdAt: string
-  size: SingleImageSize
-  quality: typeof singleImageQualities[number]
-  outputFormat: typeof singleImageFormats[number]
-  mode: 'generate' | 'edit'
 }
 
 function classNames(...items: Array<string | false | undefined>): string {
@@ -479,6 +466,12 @@ function statusLabel(status: PageStatus): string {
   return '未生成'
 }
 
+function historyModeLabel(value: StudioMode): string {
+  if (value === 'taobao') return '淘宝历史'
+  if (value === 'single') return '单图历史'
+  return '小红书历史'
+}
+
 function isImageOperationStatus(status?: PageStatus): boolean {
   return status === 'queued' || status === 'loading'
 }
@@ -513,10 +506,11 @@ export default function App() {
   const [adjustPageId, setAdjustPageId] = useState('')
   const [adjustInstruction, setAdjustInstruction] = useState('')
   const [studioMode, setStudioMode] = useState<StudioMode>('xhs')
+  const [historyLimit, setHistoryLimit] = useState(getHistoryLimit())
   const [singlePrompt, setSinglePrompt] = useState(SINGLE_DEFAULT_PROMPT)
   const [singleReferenceImage, setSingleReferenceImage] = useState('')
   const [singleReferenceImageName, setSingleReferenceImageName] = useState('')
-  const [singleImageResults, setSingleImageResults] = useState<SingleImageResult[]>([])
+  const [singleImageResults, setSingleImageResults] = useState<SavedSingleImage[]>([])
   const [singleSelectedImageId, setSingleSelectedImageId] = useState('')
   const [singlePreviewImageId, setSinglePreviewImageId] = useState('')
   const [singleStatus, setSingleStatus] = useState<SingleImageStatus>('idle')
@@ -548,9 +542,13 @@ export default function App() {
   useEffect(() => {
     void refreshHealth()
     void loadEnvConfig()
-    void loadHistory().then((items) => {
+    void loadHistory('xhs').then((items) => {
       setHistory(items)
       if (items[0]) loadSaved(items[0])
+    })
+    void loadSingleHistory().then((items) => {
+      setSingleImageResults(items)
+      setSingleSelectedImageId(items[0]?.id ?? '')
     })
   }, [])
 
@@ -1025,11 +1023,13 @@ export default function App() {
   function switchMode(nextMode: ProjectMode) {
     if (nextMode === mode) {
       setStudioMode(nextMode)
+      void loadHistory(nextMode).then(setHistory)
       return
     }
     setStudioMode(nextMode)
     workspaceRef.current[mode] = currentWorkspaceSnapshot()
     applyWorkspace(nextMode, workspaceRef.current[nextMode] ?? createModeWorkspace(nextMode))
+    void loadHistory(nextMode).then(setHistory)
   }
 
   function openSingleMode() {
@@ -1041,6 +1041,10 @@ export default function App() {
     setPreviewPageId('')
     setAdjustPageId('')
     setIsPreviewActualSize(false)
+    void loadSingleHistory().then((items) => {
+      setSingleImageResults(items)
+      setSingleSelectedImageId((current) => current && items.some((item) => item.id === current) ? current : items[0]?.id ?? '')
+    })
   }
 
   async function uploadReferenceImage(file: File | undefined) {
@@ -1104,8 +1108,8 @@ export default function App() {
     size: SingleImageSize
     quality: typeof singleImageQualities[number]
     outputFormat: typeof singleImageFormats[number]
-    mode: SingleImageResult['mode']
-  }): SingleImageResult {
+    mode: SavedSingleImage['mode']
+  }): SavedSingleImage {
     return {
       id: `single-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       image: args.image,
@@ -1163,7 +1167,8 @@ export default function App() {
         outputFormat: requestOutputFormat,
         mode: 'generate',
       })
-      setSingleImageResults((current) => [nextResult, ...current])
+      const saved = await rememberSingleImage(nextResult)
+      setSingleImageResults(saved)
       setSingleSelectedImageId(nextResult.id)
       setSingleStatus('done')
     } catch (err) {
@@ -1223,7 +1228,8 @@ export default function App() {
         outputFormat: requestOutputFormat,
         mode: 'edit',
       })
-      setSingleImageResults((current) => [nextResult, ...current])
+      const saved = await rememberSingleImage(nextResult)
+      setSingleImageResults(saved)
       setSingleSelectedImageId(nextResult.id)
       setSingleEditInstruction('')
       setSingleStatus('done')
@@ -1245,7 +1251,7 @@ export default function App() {
     setSingleError('已停止生成')
   }
 
-  function resetSingleWorkspace() {
+  async function resetSingleWorkspace() {
     if (!singlePrompt.trim() && !singleReferenceImage && singleImageResults.length === 0) return
     if (!window.confirm('清空当前单图提示词、参考图和生成结果？')) return
     singleImageControllerRef.current?.abort()
@@ -1259,6 +1265,7 @@ export default function App() {
     setSingleEditInstruction('')
     setSingleStatus('idle')
     setSingleError('')
+    await clearSingleHistory()
   }
 
   function openSinglePreview(imageId: string) {
@@ -1288,7 +1295,7 @@ export default function App() {
     }
     const operationMode = cleanProject.config.mode
     const saved = await rememberProject(toSavedProject(cleanProject, imageSnapshot ?? imagesRef.current[operationMode] ?? workspaceRef.current[operationMode].images))
-    setHistory(saved)
+    if (activeModeRef.current === operationMode && studioMode !== 'single') setHistory(saved)
   }
 
   async function composeCurrentProject(signal: AbortSignal, operationMode = mode): Promise<XhsProject | null> {
@@ -1425,6 +1432,7 @@ export default function App() {
   function loadSaved(item: SavedProject) {
     workspaceRef.current[mode] = currentWorkspaceSnapshot()
     const itemConfig = normalizeConfig(item.config)
+    setStudioMode(itemConfig.mode)
     applyWorkspace(itemConfig.mode, {
       topic: item.topic,
       config: itemConfig,
@@ -1437,16 +1445,44 @@ export default function App() {
       referenceImageName: '',
       settingsReady: true,
     })
+    void loadHistory(itemConfig.mode).then(setHistory)
   }
 
   async function deleteSaved(id: string) {
-    const next = await saveHistory(history.filter((item) => item.id !== id))
+    const next = await saveHistory(history.filter((item) => item.id !== id), mode)
     setHistory(next)
   }
 
   async function clearSaved() {
-    await clearHistory()
+    await clearHistory(mode)
     setHistory([])
+  }
+
+  async function deleteSingleSaved(id: string) {
+    const next = await saveSingleHistory(singleImageResults.filter((item) => item.id !== id))
+    setSingleImageResults(next)
+    setSingleSelectedImageId((current) => current === id ? next[0]?.id ?? '' : current)
+  }
+
+  async function clearSingleSaved() {
+    await clearSingleHistory()
+    setSingleImageResults([])
+    setSingleSelectedImageId('')
+    setSinglePreviewImageId('')
+  }
+
+  async function changeHistoryLimit(value: number) {
+    const nextLimit = await updateHistoryLimit(value)
+    setHistoryLimit(nextLimit)
+    if (studioMode === 'single') {
+      const nextSingles = await loadSingleHistory()
+      setSingleImageResults(nextSingles)
+      setSingleSelectedImageId((current) => current && nextSingles.some((item) => item.id === current) ? current : nextSingles[0]?.id ?? '')
+      return
+    }
+
+    const nextHistory = await loadHistory(mode)
+    setHistory(nextHistory)
   }
 
   function resetCurrentProject() {
@@ -1909,7 +1945,7 @@ export default function App() {
                   {isSingleBusy ? <Loader2 className="spin" size={18} /> : <Sparkles size={18} />}
                   生成图片
                 </button>
-                <button className="reset-button" type="button" onClick={resetSingleWorkspace} disabled={isSingleBusy}>
+                <button className="reset-button" type="button" onClick={() => void resetSingleWorkspace()} disabled={isSingleBusy}>
                   <Trash2 size={18} />
                   清空
                 </button>
@@ -2374,28 +2410,62 @@ export default function App() {
             <div className="empty-small">暂无方案</div>
           )}
 
-          {studioMode !== 'single' && (
-            <div className="history-block">
-              <div className="mini-heading">
-                <span><History size={16} />历史</span>
-                <button type="button" onClick={() => void clearSaved()} disabled={!history.length}><Trash2 size={15} />清空</button>
-              </div>
-              <div className="history-list">
-                {history.length === 0 && <p className="muted">暂无记录</p>}
-                {history.map((item) => (
-                  <div className="history-item" key={item.id}>
-                    <button type="button" onClick={() => loadSaved(item)}>
-                      <strong>{item.topic}</strong>
-                      <span>{new Date(item.createdAt).toLocaleString()}</span>
-                    </button>
-                    <button className="icon-button danger" type="button" aria-label="删除历史" onClick={() => void deleteSaved(item.id)}>
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                ))}
-              </div>
+          <div className="history-block">
+            <div className="mini-heading">
+              <span><History size={16} />{historyModeLabel(studioMode)}</span>
+              <button
+                type="button"
+                onClick={() => studioMode === 'single' ? void clearSingleSaved() : void clearSaved()}
+                disabled={studioMode === 'single' ? !singleImageResults.length : !history.length}
+              >
+                <Trash2 size={15} />清空
+              </button>
             </div>
-          )}
+            <label className="history-limit-row">
+              <span>最多保存</span>
+              <input
+                type="number"
+                min={1}
+                max={30}
+                value={historyLimit}
+                onChange={(event) => void changeHistoryLimit(Number(event.target.value))}
+              />
+              <span>条/模式</span>
+            </label>
+            <div className="history-list">
+              {studioMode === 'single' ? (
+                <>
+                  {singleImageResults.length === 0 && <p className="muted">暂无记录</p>}
+                  {singleImageResults.map((item) => (
+                    <div className="history-item" key={item.id}>
+                      <button type="button" onClick={() => setSingleSelectedImageId(item.id)}>
+                        <strong>{item.prompt}</strong>
+                        <span>{item.mode === 'edit' ? '调整图片' : '生成图片'} / {new Date(item.createdAt).toLocaleString()}</span>
+                      </button>
+                      <button className="icon-button danger" type="button" aria-label="删除历史" onClick={() => void deleteSingleSaved(item.id)}>
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  ))}
+                </>
+              ) : (
+                <>
+                  {history.length === 0 && <p className="muted">暂无记录</p>}
+                  {history.map((item) => (
+                    <div className="history-item" key={item.id}>
+                      <button type="button" onClick={() => loadSaved(item)}>
+                        <strong>{item.topic}</strong>
+                        <span>{new Date(item.createdAt).toLocaleString()}</span>
+                      </button>
+                      <button className="icon-button danger" type="button" aria-label="删除历史" onClick={() => void deleteSaved(item.id)}>
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          </div>
         </aside>
       </main>
     </div>

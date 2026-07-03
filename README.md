@@ -25,7 +25,7 @@ Red Image Studio 是一个本地运行的 AI 图片工作台，用 `gpt-image-2`
 - 生成队列：最多 2 个图片请求并发，每次启动请求至少间隔 5 秒。
 - 状态展示：页面卡片区分未生成、排队中、生成中、已完成和失败。
 - 停止生成：可中途停止方案生成或图片队列。
-- 历史记录：方案和图片保存在浏览器 IndexedDB 中，最多保留 3 条。
+- 历史记录：小红书、淘宝、单图三种模式分开保存，可在页面里设置每个模式最多保存几条。
 - 图片预览：点击图片可放大查看，并左右切换。
 - 导出 ZIP：导出项目 JSON、发布文案、全部提示词和已生成图片。
 - 页面配置 API：可在界面里配置 API Key、API URL、文本模型、图片模型和图片超时时间。
@@ -185,7 +185,8 @@ npm run preview
 
 - 历史方案和图片存储在浏览器 IndexedDB。
 - 旧版本 localStorage 历史会自动迁移。
-- 最多保留 3 条历史记录。
+- 小红书、淘宝、单图历史分开保存。
+- 历史上限是每个模式各自的上限，可在页面历史区修改。
 - `.env` 只保存在本机项目目录，不会提交到 git。
 
 ## 导出内容
@@ -250,7 +251,7 @@ This project is a fresh implementation. It does not copy source code or prompt f
 - Image queue: at most 2 concurrent image requests, with at least 5 seconds between request starts.
 - Clear states: page cards show idle, queued, generating, done, and error states.
 - Stop generation: stop plan generation or the image queue midway.
-- History: projects and images are stored in browser IndexedDB, capped at 3 records.
+- History: Xiaohongshu, Taobao, and single-image records are stored separately, with a configurable per-mode limit.
 - Preview: click an image to view it larger and navigate left/right.
 - ZIP export: export project JSON, caption, prompts, and generated images.
 - In-page API configuration: configure API Key, API URL, text model, image model, and image timeout from the UI.
@@ -410,7 +411,8 @@ The prompts include safety-oriented visual guidance. For topics involving babies
 
 - History projects and images are stored in browser IndexedDB.
 - Legacy localStorage history is migrated automatically.
-- The app keeps up to 3 history records.
+- Xiaohongshu, Taobao, and single-image history are stored separately.
+- The history limit is applied per mode and can be changed in the history panel.
 - `.env` stays in the local project folder and is excluded from git.
 
 ## Export
