@@ -39,10 +39,14 @@ const XHS_IMAGE_QUALITY = 'medium'
 const XHS_IMAGE_FORMAT = 'png'
 const XHS_DEFAULT_TOPIC = '给自由职业者做一套高效工作流图文'
 const TAOBAO_DEFAULT_TOPIC = '便携式咖啡杯，主打不漏水、通勤好看、送礼体面'
+const SINGLE_DEFAULT_PROMPT = '一只透明玻璃杯放在浅色桌面上，柔和自然光，干净产品摄影，背景简洁'
 const XHS_DEFAULT_AUDIENCE = '想提升内容质感的新手创作者'
 const TAOBAO_DEFAULT_AUDIENCE = '有明确购买需求的淘宝用户'
 const IMAGE_POOL_SIZE = 2
 const IMAGE_REQUEST_GAP_MS = 5000
+const singleImageSizes = ['1024x1024', '1024x1536', '1536x1024'] as const
+const singleImageQualities = ['low', 'medium', 'high'] as const
+const singleImageFormats = ['png', 'jpeg', 'webp'] as const
 const emptyEnvConfig: EnvConfig = {
   openaiApiKey: '',
   openaiBaseUrl: 'https://api.openai.com/v1',
@@ -65,6 +69,9 @@ const defaultConfig: StudioConfig = {
 }
 
 type PageStatus = 'idle' | 'queued' | 'loading' | 'done' | 'error'
+type StudioMode = ProjectMode | 'single'
+type SingleImageStatus = 'idle' | 'loading' | 'done' | 'error'
+type SingleImageSize = typeof singleImageSizes[number]
 type BusyState = 'settings' | 'compose' | 'all' | null
 type PendingSettingsAction = 'compose' | 'all'
 type ImageReferenceResolver = string | (() => string | undefined) | undefined
@@ -99,6 +106,19 @@ interface ImageQueueTask {
   editInstruction?: string
   controller: AbortController
   resolve: (image: string | null) => void
+}
+
+interface SingleImageResult {
+  id: string
+  image: string
+  prompt: string
+  editInstruction?: string
+  referenceName?: string
+  createdAt: string
+  size: SingleImageSize
+  quality: typeof singleImageQualities[number]
+  outputFormat: typeof singleImageFormats[number]
+  mode: 'generate' | 'edit'
 }
 
 function classNames(...items: Array<string | false | undefined>): string {
@@ -196,6 +216,47 @@ function readImageFile(file: File): Promise<string> {
     reader.onerror = () => reject(new Error('参考图读取失败'))
     reader.readAsDataURL(file)
   })
+}
+
+function createSingleImageProject(args: {
+  prompt: string
+  size: SingleImageSize
+  quality: typeof singleImageQualities[number]
+  outputFormat: typeof singleImageFormats[number]
+}): { project: XhsProject; page: XhsPage } {
+  const now = Date.now()
+  const page: XhsPage = {
+    id: `single-page-${now}`,
+    index: 0,
+    type: 'cover',
+    headline: '单图生成',
+    subhead: '',
+    bullets: [],
+    visualBrief: '单独图片生成',
+    imagePrompt: args.prompt,
+  }
+  const project: XhsProject = {
+    id: `single-project-${now}`,
+    topic: args.prompt,
+    titleOptions: [args.prompt.slice(0, 40) || '单图生成'],
+    caption: '',
+    tags: ['单图生成'],
+    pages: [page],
+    createdAt: new Date().toISOString(),
+    config: {
+      mode: 'taobao',
+      field: '生活方式',
+      audience: '单图生成用户',
+      visualStyle: '清爽实用',
+      pageCount: 1,
+      size: args.size,
+      quality: args.quality,
+      outputFormat: args.outputFormat,
+      moderation: 'auto',
+      useCoverReference: false,
+    },
+  }
+  return { project, page }
 }
 
 function pageToDraft(page: XhsPage): PageDraft {
@@ -451,6 +512,20 @@ export default function App() {
   const [referenceImageName, setReferenceImageName] = useState('')
   const [adjustPageId, setAdjustPageId] = useState('')
   const [adjustInstruction, setAdjustInstruction] = useState('')
+  const [studioMode, setStudioMode] = useState<StudioMode>('xhs')
+  const [singlePrompt, setSinglePrompt] = useState(SINGLE_DEFAULT_PROMPT)
+  const [singleReferenceImage, setSingleReferenceImage] = useState('')
+  const [singleReferenceImageName, setSingleReferenceImageName] = useState('')
+  const [singleImageResults, setSingleImageResults] = useState<SingleImageResult[]>([])
+  const [singleSelectedImageId, setSingleSelectedImageId] = useState('')
+  const [singlePreviewImageId, setSinglePreviewImageId] = useState('')
+  const [singleStatus, setSingleStatus] = useState<SingleImageStatus>('idle')
+  const [singleError, setSingleError] = useState('')
+  const [singleEditInstruction, setSingleEditInstruction] = useState('')
+  const [singleSize, setSingleSize] = useState<SingleImageSize>('1024x1024')
+  const [singleQuality, setSingleQuality] = useState<typeof singleImageQualities[number]>('medium')
+  const [singleOutputFormat, setSingleOutputFormat] = useState<typeof singleImageFormats[number]>('png')
+  const singleImageControllerRef = useRef<AbortController | null>(null)
   const workspaceRef = useRef<Record<ProjectMode, ModeWorkspace>>({
     xhs: createModeWorkspace('xhs'),
     taobao: createModeWorkspace('taobao'),
@@ -505,7 +580,21 @@ export default function App() {
   const generatedCount = useMemo(() => Object.values(images).filter(Boolean).length, [images])
   const bounds = pageBounds(mode)
   const isImageBusy = activeImageCount + queuedImageCount > 0
+  const isSingleBusy = singleStatus === 'loading'
   const isGenerationLocked = Boolean(busy) || isImageBusy
+  const selectedSingleImage = useMemo(() => {
+    return singleImageResults.find((item) => item.id === singleSelectedImageId) ?? singleImageResults[0] ?? null
+  }, [singleImageResults, singleSelectedImageId])
+  const singlePreviewImage = useMemo(() => {
+    return singleImageResults.find((item) => item.id === singlePreviewImageId) ?? null
+  }, [singleImageResults, singlePreviewImageId])
+  const singlePreviewableImages = useMemo(() => {
+    return singleImageResults.filter((item) => Boolean(item.image))
+  }, [singleImageResults])
+  const singlePreviewPosition = useMemo(() => {
+    return singlePreviewableImages.findIndex((item) => item.id === singlePreviewImageId)
+  }, [singlePreviewImageId, singlePreviewableImages])
+  const canNavigateSinglePreview = singlePreviewableImages.length > 1
 
   function currentWorkspaceSnapshot(): ModeWorkspace {
     return {
@@ -846,6 +935,23 @@ export default function App() {
     return () => window.removeEventListener('keydown', closeOnEscape)
   }, [previewPageId, previewablePages])
 
+  useEffect(() => {
+    if (!singlePreviewImageId) return undefined
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeSinglePreview()
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault()
+        navigateSinglePreview(-1)
+      }
+      if (event.key === 'ArrowRight') {
+        event.preventDefault()
+        navigateSinglePreview(1)
+      }
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [singlePreviewImageId, singlePreviewableImages])
+
   function openPreview(pageId: string) {
     setPreviewPageId(pageId)
     setIsPreviewActualSize(false)
@@ -917,9 +1023,24 @@ export default function App() {
   }
 
   function switchMode(nextMode: ProjectMode) {
-    if (nextMode === mode) return
+    if (nextMode === mode) {
+      setStudioMode(nextMode)
+      return
+    }
+    setStudioMode(nextMode)
     workspaceRef.current[mode] = currentWorkspaceSnapshot()
     applyWorkspace(nextMode, workspaceRef.current[nextMode] ?? createModeWorkspace(nextMode))
+  }
+
+  function openSingleMode() {
+    workspaceRef.current[mode] = currentWorkspaceSnapshot()
+    setStudioMode('single')
+    setError('')
+    setSettingsPromptAction(null)
+    setPageDraft(null)
+    setPreviewPageId('')
+    setAdjustPageId('')
+    setIsPreviewActualSize(false)
   }
 
   async function uploadReferenceImage(file: File | undefined) {
@@ -949,6 +1070,215 @@ export default function App() {
       referenceImage: '',
       referenceImageName: '',
     })
+  }
+
+  async function uploadSingleReferenceImage(file: File | undefined) {
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      setSingleError('请上传图片文件')
+      return
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      setSingleError('参考图不能超过 8MB')
+      return
+    }
+    setSingleError('')
+    try {
+      setSingleReferenceImage(await readImageFile(file))
+      setSingleReferenceImageName(file.name)
+    } catch (err) {
+      setSingleError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  function clearSingleReferenceImage() {
+    setSingleReferenceImage('')
+    setSingleReferenceImageName('')
+  }
+
+  function createSingleResult(args: {
+    image: string
+    prompt: string
+    editInstruction?: string
+    referenceName?: string
+    size: SingleImageSize
+    quality: typeof singleImageQualities[number]
+    outputFormat: typeof singleImageFormats[number]
+    mode: SingleImageResult['mode']
+  }): SingleImageResult {
+    return {
+      id: `single-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      image: args.image,
+      prompt: args.prompt,
+      editInstruction: args.editInstruction,
+      referenceName: args.referenceName,
+      createdAt: new Date().toISOString(),
+      size: args.size,
+      quality: args.quality,
+      outputFormat: args.outputFormat,
+      mode: args.mode,
+    }
+  }
+
+  async function generateSingleImage() {
+    if (isSingleBusy || isImageBusy) return
+    const cleanPrompt = singlePrompt.trim()
+    if (!cleanPrompt) {
+      setSingleError('请输入图片提示词')
+      return
+    }
+
+    const controller = new AbortController()
+    singleImageControllerRef.current?.abort()
+    singleImageControllerRef.current = controller
+    setSingleStatus('loading')
+    setSingleError('')
+    const requestSize = singleSize
+    const requestQuality = singleQuality
+    const requestOutputFormat = singleOutputFormat
+    const requestReferenceImage = singleReferenceImage
+    const requestReferenceName = singleReferenceImageName
+
+    const { project: singleProject, page } = createSingleImageProject({
+      prompt: cleanPrompt,
+      size: requestSize,
+      quality: requestQuality,
+      outputFormat: requestOutputFormat,
+    })
+
+    try {
+      const response = await generateImage({
+        project: singleProject,
+        page,
+        referenceImage: requestReferenceImage || undefined,
+      }, { signal: controller.signal })
+      if (controller.signal.aborted) return
+
+      const nextResult = createSingleResult({
+        image: response.image,
+        prompt: cleanPrompt,
+        referenceName: requestReferenceName || undefined,
+        size: requestSize,
+        quality: requestQuality,
+        outputFormat: requestOutputFormat,
+        mode: 'generate',
+      })
+      setSingleImageResults((current) => [nextResult, ...current])
+      setSingleSelectedImageId(nextResult.id)
+      setSingleStatus('done')
+    } catch (err) {
+      if (controller.signal.aborted || isAbortError(err)) return
+      setSingleStatus('error')
+      setSingleError(err instanceof Error ? err.message : String(err))
+    } finally {
+      if (singleImageControllerRef.current === controller) singleImageControllerRef.current = null
+    }
+  }
+
+  async function adjustSingleImage() {
+    if (isSingleBusy || isImageBusy) return
+    if (!selectedSingleImage) {
+      setSingleError('请先生成或选择一张图片')
+      return
+    }
+
+    const cleanInstruction = singleEditInstruction.trim()
+    if (!cleanInstruction) {
+      setSingleError('请输入调整需求')
+      return
+    }
+
+    const controller = new AbortController()
+    singleImageControllerRef.current?.abort()
+    singleImageControllerRef.current = controller
+    setSingleStatus('loading')
+    setSingleError('')
+    const requestSize = singleSize
+    const requestQuality = singleQuality
+    const requestOutputFormat = singleOutputFormat
+
+    const { project: singleProject, page } = createSingleImageProject({
+      prompt: selectedSingleImage.prompt,
+      size: requestSize,
+      quality: requestQuality,
+      outputFormat: requestOutputFormat,
+    })
+
+    try {
+      const response = await generateImage({
+        project: singleProject,
+        page,
+        referenceImage: selectedSingleImage.image,
+        editInstruction: cleanInstruction,
+      }, { signal: controller.signal })
+      if (controller.signal.aborted) return
+
+      const nextResult = createSingleResult({
+        image: response.image,
+        prompt: selectedSingleImage.prompt,
+        editInstruction: cleanInstruction,
+        referenceName: '上一张生成图',
+        size: requestSize,
+        quality: requestQuality,
+        outputFormat: requestOutputFormat,
+        mode: 'edit',
+      })
+      setSingleImageResults((current) => [nextResult, ...current])
+      setSingleSelectedImageId(nextResult.id)
+      setSingleEditInstruction('')
+      setSingleStatus('done')
+    } catch (err) {
+      if (controller.signal.aborted || isAbortError(err)) return
+      setSingleStatus('error')
+      setSingleError(err instanceof Error ? err.message : String(err))
+    } finally {
+      if (singleImageControllerRef.current === controller) singleImageControllerRef.current = null
+    }
+  }
+
+  function stopSingleImage() {
+    const controller = singleImageControllerRef.current
+    if (!controller) return
+    controller.abort()
+    singleImageControllerRef.current = null
+    setSingleStatus('idle')
+    setSingleError('已停止生成')
+  }
+
+  function resetSingleWorkspace() {
+    if (!singlePrompt.trim() && !singleReferenceImage && singleImageResults.length === 0) return
+    if (!window.confirm('清空当前单图提示词、参考图和生成结果？')) return
+    singleImageControllerRef.current?.abort()
+    singleImageControllerRef.current = null
+    setSinglePrompt('')
+    setSingleReferenceImage('')
+    setSingleReferenceImageName('')
+    setSingleImageResults([])
+    setSingleSelectedImageId('')
+    setSinglePreviewImageId('')
+    setSingleEditInstruction('')
+    setSingleStatus('idle')
+    setSingleError('')
+  }
+
+  function openSinglePreview(imageId: string) {
+    setSinglePreviewImageId(imageId)
+    setIsPreviewActualSize(false)
+  }
+
+  function closeSinglePreview() {
+    setSinglePreviewImageId('')
+    setIsPreviewActualSize(false)
+  }
+
+  function navigateSinglePreview(direction: -1 | 1) {
+    if (singlePreviewableImages.length <= 1) return
+    const currentIndex = singlePreviewableImages.findIndex((item) => item.id === singlePreviewImageId)
+    const nextIndex = ((currentIndex >= 0 ? currentIndex : 0) + direction + singlePreviewableImages.length) % singlePreviewableImages.length
+    const nextImage = singlePreviewableImages[nextIndex]
+    setSinglePreviewImageId(nextImage.id)
+    setSingleSelectedImageId(nextImage.id)
+    setIsPreviewActualSize(false)
   }
 
   async function persistProjectSnapshot(targetProject: XhsProject, imageSnapshot?: Record<string, string>): Promise<void> {
@@ -1435,6 +1765,47 @@ export default function App() {
         </div>
       )}
 
+      {singlePreviewImage && (
+        <div className="image-lightbox" role="dialog" aria-modal="true" aria-label="单图预览" onMouseDown={closeSinglePreview}>
+          <section className="lightbox-panel" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="lightbox-header">
+              <div>
+                <p className="eyebrow">
+                  单图 / {singlePreviewPosition >= 0 ? `${singlePreviewPosition + 1}/${singlePreviewableImages.length}` : '预览'}
+                </p>
+                <h2>{singlePreviewImage.mode === 'edit' ? '调整结果' : '生成结果'}</h2>
+              </div>
+              <div className="lightbox-actions">
+                <button type="button" aria-pressed={isPreviewActualSize} onClick={() => setIsPreviewActualSize((value) => !value)}>
+                  {isPreviewActualSize ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+                  {isPreviewActualSize ? '适应窗口' : '原图尺寸'}
+                </button>
+                <button type="button" onClick={() => downloadDataUrl(singlePreviewImage.image, `single-${singlePreviewImage.id}.${singlePreviewImage.outputFormat}`)}>
+                  <Download size={18} />
+                  下载
+                </button>
+                <button className="icon-button" type="button" onClick={closeSinglePreview} aria-label="关闭大图">
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+            {canNavigateSinglePreview && (
+              <>
+                <button className="lightbox-nav previous" type="button" onClick={() => navigateSinglePreview(-1)} aria-label="上一张图片">
+                  <ChevronLeft size={28} />
+                </button>
+                <button className="lightbox-nav next" type="button" onClick={() => navigateSinglePreview(1)} aria-label="下一张图片">
+                  <ChevronRight size={28} />
+                </button>
+              </>
+            )}
+            <div className={classNames('lightbox-image-wrap', isPreviewActualSize && 'actual-size')}>
+              <img src={singlePreviewImage.image} alt={singlePreviewImage.prompt} />
+            </div>
+          </section>
+        </div>
+      )}
+
       <main className="workspace">
         <section className="panel composer" aria-label="生成设置">
           <div className="panel-title">
@@ -1444,7 +1815,7 @@ export default function App() {
 
           <div className="mode-switch" aria-label="生成类型">
             <button
-              className={classNames(mode === 'xhs' && 'active')}
+              className={classNames(studioMode === 'xhs' && 'active')}
               type="button"
               onClick={() => switchMode('xhs')}
             >
@@ -1452,24 +1823,115 @@ export default function App() {
               小红书图文
             </button>
             <button
-              className={classNames(mode === 'taobao' && 'active')}
+              className={classNames(studioMode === 'taobao' && 'active')}
               type="button"
               onClick={() => switchMode('taobao')}
             >
               <ShoppingBag size={18} />
               淘宝宣传图
             </button>
+            <button
+              className={classNames(studioMode === 'single' && 'active')}
+              type="button"
+              onClick={openSingleMode}
+            >
+              <ImageIcon size={18} />
+              单图生成
+            </button>
           </div>
 
-          <label className="field-block">
-            <span>{mode === 'taobao' ? '商品/活动' : '选题'}</span>
-            <textarea
-              value={topic}
-              onChange={(event) => updateTopic(event.target.value)}
-              rows={5}
-              placeholder={mode === 'taobao' ? TAOBAO_DEFAULT_TOPIC : XHS_DEFAULT_TOPIC}
-            />
-          </label>
+          {studioMode === 'single' ? (
+            <div className="single-composer">
+              <label className="field-block">
+                <span>图片提示词</span>
+                <textarea
+                  value={singlePrompt}
+                  onChange={(event) => setSinglePrompt(event.target.value)}
+                  rows={8}
+                  placeholder={SINGLE_DEFAULT_PROMPT}
+                />
+              </label>
+
+              <div className="reference-upload">
+                <div className="mini-heading">
+                  <span>参考图</span>
+                  {singleReferenceImage && <button type="button" onClick={clearSingleReferenceImage}><X size={15} />移除</button>}
+                </div>
+                {singleReferenceImage ? (
+                  <div className="reference-preview">
+                    <img src={singleReferenceImage} alt="单图参考图" />
+                    <div>
+                      <strong>{singleReferenceImageName || '已上传参考图'}</strong>
+                      <span>有参考图时走图片编辑接口</span>
+                    </div>
+                  </div>
+                ) : (
+                  <label className="upload-drop">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(event) => {
+                        void uploadSingleReferenceImage(event.target.files?.[0])
+                        event.currentTarget.value = ''
+                      }}
+                    />
+                    <UploadCloud size={22} />
+                    <span>上传参考图</span>
+                  </label>
+                )}
+              </div>
+
+              <div className="single-param-grid">
+                <label className="field-block">
+                  <span>尺寸</span>
+                  <select value={singleSize} onChange={(event) => setSingleSize(event.target.value as SingleImageSize)}>
+                    {singleImageSizes.map((item) => <option key={item} value={item}>{item}</option>)}
+                  </select>
+                </label>
+                <label className="field-block">
+                  <span>质量</span>
+                  <select value={singleQuality} onChange={(event) => setSingleQuality(event.target.value as typeof singleImageQualities[number])}>
+                    {singleImageQualities.map((item) => <option key={item} value={item}>{item}</option>)}
+                  </select>
+                </label>
+                <label className="field-block">
+                  <span>格式</span>
+                  <select value={singleOutputFormat} onChange={(event) => setSingleOutputFormat(event.target.value as typeof singleImageFormats[number])}>
+                    {singleImageFormats.map((item) => <option key={item} value={item}>{item}</option>)}
+                  </select>
+                </label>
+              </div>
+
+              {singleError && <div className="error-box" role="alert">{singleError}</div>}
+
+              <div className="button-row">
+                <button className="primary-button" type="button" onClick={() => void generateSingleImage()} disabled={isSingleBusy || isImageBusy}>
+                  {isSingleBusy ? <Loader2 className="spin" size={18} /> : <Sparkles size={18} />}
+                  生成图片
+                </button>
+                <button className="reset-button" type="button" onClick={resetSingleWorkspace} disabled={isSingleBusy}>
+                  <Trash2 size={18} />
+                  清空
+                </button>
+                {isSingleBusy && (
+                  <button className="stop-button" type="button" onClick={stopSingleImage}>
+                    <CircleStop size={18} />
+                    停止
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : (
+            <>
+              <label className="field-block">
+                <span>{mode === 'taobao' ? '商品/活动' : '选题'}</span>
+                <textarea
+                  value={topic}
+                  onChange={(event) => updateTopic(event.target.value)}
+                  rows={5}
+                  placeholder={mode === 'taobao' ? TAOBAO_DEFAULT_TOPIC : XHS_DEFAULT_TOPIC}
+                />
+              </label>
 
           {mode === 'taobao' && (
             <div className="reference-upload">
@@ -1584,21 +2046,82 @@ export default function App() {
               </button>
             ) : null}
           </div>
+            </>
+          )}
         </section>
 
         <section className="panel canvas" aria-label="页面预览">
           <div className="panel-heading-row">
             <div className="panel-title">
               <ImageIcon size={20} aria-hidden="true" />
-              <h2>页面</h2>
+              <h2>{studioMode === 'single' ? '单图' : '页面'}</h2>
             </div>
             <div className="count-label">
-              <span>{generatedCount}/{project?.pages.length ?? 0}</span>
-              {isImageBusy && <span>请求中 {activeImageCount} / 排队 {queuedImageCount}</span>}
+              {studioMode === 'single' ? (
+                <>
+                  <span>{singleImageResults.length} 张</span>
+                  {isSingleBusy && <span>生成中</span>}
+                </>
+              ) : (
+                <>
+                  <span>{generatedCount}/{project?.pages.length ?? 0}</span>
+                  {isImageBusy && <span>请求中 {activeImageCount} / 排队 {queuedImageCount}</span>}
+                </>
+              )}
             </div>
           </div>
 
-          {!project ? (
+          {studioMode === 'single' ? (
+            <div className="single-workspace">
+              {selectedSingleImage ? (
+                <div className="single-hero">
+                  <button className="single-hero-image" type="button" onClick={() => openSinglePreview(selectedSingleImage.id)}>
+                    <img src={selectedSingleImage.image} alt={selectedSingleImage.prompt} />
+                    <span className="zoom-affordance"><Maximize2 size={17} /></span>
+                  </button>
+                  <div className="single-hero-meta">
+                    <span>{selectedSingleImage.mode === 'edit' ? '调整结果' : selectedSingleImage.referenceName ? '参考图生成' : '文生图'}</span>
+                    <span>{selectedSingleImage.size} / {selectedSingleImage.quality} / {selectedSingleImage.outputFormat}</span>
+                  </div>
+                </div>
+              ) : isSingleBusy ? (
+                <div className="empty-state">
+                  <Loader2 className="spin" size={42} aria-hidden="true" />
+                  <p>正在生成图片</p>
+                </div>
+              ) : (
+                <div className="empty-state">
+                  <ImageIcon size={42} aria-hidden="true" />
+                  <p>输入提示词后生成图片</p>
+                </div>
+              )}
+
+              {singleImageResults.length > 0 && (
+                <div className="single-result-grid">
+                  {singleImageResults.map((item) => (
+                    <button
+                      className={classNames('single-result-card', selectedSingleImage?.id === item.id && 'active')}
+                      type="button"
+                      key={item.id}
+                      onClick={(event) => {
+                        setSingleSelectedImageId(item.id)
+                        if ((event.target as HTMLElement).closest('.single-result-image')) openSinglePreview(item.id)
+                      }}
+                    >
+                      <div className="single-result-image">
+                        <img src={item.image} alt={item.prompt} />
+                        <span className="zoom-affordance"><Maximize2 size={17} /></span>
+                      </div>
+                      <div className="single-result-meta">
+                        <strong>{item.mode === 'edit' ? '调整图片' : '生成图片'}</strong>
+                        <span>{new Date(item.createdAt).toLocaleString()}</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : !project ? (
             <div className="empty-state">
               <ImageIcon size={42} aria-hidden="true" />
               <p>输入选题后生成方案</p>
@@ -1727,14 +2250,92 @@ export default function App() {
           <div className="panel-heading-row">
             <div className="panel-title">
               <Archive size={20} aria-hidden="true" />
-              <h2>发布</h2>
+              <h2>{studioMode === 'single' ? '详情' : '发布'}</h2>
             </div>
-            <button className="icon-button" type="button" onClick={exportCurrent} disabled={!project} aria-label="导出 ZIP">
-              <Download size={18} />
-            </button>
+            {studioMode === 'single' ? (
+              <button className="icon-button" type="button" onClick={() => selectedSingleImage && downloadDataUrl(selectedSingleImage.image, `single-${selectedSingleImage.id}.${selectedSingleImage.outputFormat}`)} disabled={!selectedSingleImage} aria-label="下载单图">
+                <Download size={18} />
+              </button>
+            ) : (
+              <button className="icon-button" type="button" onClick={exportCurrent} disabled={!project} aria-label="导出 ZIP">
+                <Download size={18} />
+              </button>
+            )}
           </div>
 
-          {project ? (
+          {studioMode === 'single' ? (
+            selectedSingleImage ? (
+              <div className="publish-stack single-detail-stack">
+                <button className="single-detail-preview" type="button" onClick={() => openSinglePreview(selectedSingleImage.id)}>
+                  <img src={selectedSingleImage.image} alt={selectedSingleImage.prompt} />
+                  <span><Maximize2 size={16} />查看大图</span>
+                </button>
+
+                <div>
+                  <div className="mini-heading">
+                    <span>提示词</span>
+                    <button type="button" onClick={() => copyText(selectedSingleImage.prompt)}><Copy size={15} />复制</button>
+                  </div>
+                  <pre className="caption-box">{selectedSingleImage.prompt}</pre>
+                </div>
+
+                {selectedSingleImage.editInstruction && (
+                  <div>
+                    <div className="mini-heading">
+                      <span>调整需求</span>
+                      <button type="button" onClick={() => copyText(selectedSingleImage.editInstruction || '')}><Copy size={15} />复制</button>
+                    </div>
+                    <pre className="caption-box">{selectedSingleImage.editInstruction}</pre>
+                  </div>
+                )}
+
+                <dl className="setting-summary">
+                  <div>
+                    <dt>尺寸</dt>
+                    <dd>{selectedSingleImage.size}</dd>
+                  </div>
+                  <div>
+                    <dt>质量</dt>
+                    <dd>{selectedSingleImage.quality}</dd>
+                  </div>
+                  <div>
+                    <dt>格式</dt>
+                    <dd>{selectedSingleImage.outputFormat}</dd>
+                  </div>
+                  {selectedSingleImage.referenceName && (
+                    <div>
+                      <dt>参考</dt>
+                      <dd>{selectedSingleImage.referenceName}</dd>
+                    </div>
+                  )}
+                </dl>
+
+                <label className="field-block">
+                  <span>调整需求</span>
+                  <textarea
+                    className="content-editor"
+                    rows={5}
+                    value={singleEditInstruction}
+                    onChange={(event) => setSingleEditInstruction(event.target.value)}
+                    placeholder="例如：保留主体，换成浅灰背景，文字更清晰，商品更居中"
+                  />
+                </label>
+
+                <div className="button-row">
+                  <button className="primary-button" type="button" onClick={() => void adjustSingleImage()} disabled={isSingleBusy || isImageBusy || !singleEditInstruction.trim()}>
+                    {isSingleBusy ? <Loader2 className="spin" size={18} /> : <WandSparkles size={18} />}
+                    调整图片
+                  </button>
+                  <button className="secondary-button" type="button" onClick={() => downloadDataUrl(selectedSingleImage.image, `single-${selectedSingleImage.id}.${selectedSingleImage.outputFormat}`)}>
+                    <Download size={18} />
+                    下载
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="empty-small">暂无图片</div>
+            )
+          ) : project ? (
             <div className="publish-stack">
               <div>
                 <div className="mini-heading">
@@ -1773,26 +2374,28 @@ export default function App() {
             <div className="empty-small">暂无方案</div>
           )}
 
-          <div className="history-block">
-            <div className="mini-heading">
-              <span><History size={16} />历史</span>
-              <button type="button" onClick={() => void clearSaved()} disabled={!history.length}><Trash2 size={15} />清空</button>
+          {studioMode !== 'single' && (
+            <div className="history-block">
+              <div className="mini-heading">
+                <span><History size={16} />历史</span>
+                <button type="button" onClick={() => void clearSaved()} disabled={!history.length}><Trash2 size={15} />清空</button>
+              </div>
+              <div className="history-list">
+                {history.length === 0 && <p className="muted">暂无记录</p>}
+                {history.map((item) => (
+                  <div className="history-item" key={item.id}>
+                    <button type="button" onClick={() => loadSaved(item)}>
+                      <strong>{item.topic}</strong>
+                      <span>{new Date(item.createdAt).toLocaleString()}</span>
+                    </button>
+                    <button className="icon-button danger" type="button" aria-label="删除历史" onClick={() => void deleteSaved(item.id)}>
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="history-list">
-              {history.length === 0 && <p className="muted">暂无记录</p>}
-              {history.map((item) => (
-                <div className="history-item" key={item.id}>
-                  <button type="button" onClick={() => loadSaved(item)}>
-                    <strong>{item.topic}</strong>
-                    <span>{new Date(item.createdAt).toLocaleString()}</span>
-                  </button>
-                  <button className="icon-button danger" type="button" aria-label="删除历史" onClick={() => void deleteSaved(item.id)}>
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
+          )}
         </aside>
       </main>
     </div>

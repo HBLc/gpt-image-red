@@ -298,7 +298,7 @@ textarea:focus-visible {
 
 .mode-switch {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   margin-bottom: 14px;
 }
@@ -309,12 +309,15 @@ textarea:focus-visible {
   justify-content: center;
   gap: 7px;
   min-width: 0;
+  min-height: 48px;
   border: 1px solid var(--line);
   background: var(--surface-strong);
   color: var(--muted);
   padding: 10px 8px;
   font-size: 13px;
   font-weight: 900;
+  line-height: 1.25;
+  text-align: center;
 }
 
 .mode-switch button.active {
@@ -577,6 +580,166 @@ button:disabled {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.35;
+}
+
+.single-composer {
+  display: grid;
+  gap: 14px;
+}
+
+.single-composer .field-block,
+.single-detail-stack .field-block {
+  margin-bottom: 0;
+}
+
+.single-param-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.single-workspace {
+  display: grid;
+  gap: 18px;
+  margin-top: 16px;
+}
+
+.single-hero {
+  display: grid;
+  gap: 10px;
+}
+
+.single-hero-image,
+.single-detail-preview {
+  position: relative;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #efe3d6;
+  padding: 0;
+  color: var(--ink);
+  cursor: zoom-in;
+}
+
+.single-hero-image {
+  height: min(68dvh, 680px);
+  min-height: 360px;
+}
+
+.single-hero-image img,
+.single-detail-preview img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.single-hero-image:hover .zoom-affordance,
+.single-hero-image:focus-visible .zoom-affordance,
+.single-result-card:hover .zoom-affordance,
+.single-result-card:focus-visible .zoom-affordance {
+  opacity: 1;
+}
+
+.single-hero-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.single-hero-meta span {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  color: var(--muted);
+  padding: 7px 9px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.single-result-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(142px, 1fr));
+  gap: 14px;
+}
+
+.single-result-card {
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface-strong);
+  color: var(--ink);
+  text-align: left;
+}
+
+.single-result-card.active {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(201, 56, 43, 0.12);
+}
+
+.single-result-image {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+  border-radius: 6px;
+  background: #efe3d6;
+  cursor: zoom-in;
+}
+
+.single-result-image img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.single-result-meta {
+  display: grid;
+  gap: 3px;
+  min-height: 42px;
+}
+
+.single-result-meta strong {
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.single-result-meta span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.single-detail-stack {
+  margin-top: 16px;
+}
+
+.single-detail-preview {
+  min-height: 220px;
+  aspect-ratio: 1 / 1;
+}
+
+.single-detail-preview span {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 8px;
+  background: rgba(33, 25, 23, 0.66);
+  color: #fff;
+  padding: 7px 9px;
+  font-size: 12px;
+  font-weight: 900;
 }
 
 .setting-summary {
@@ -1249,6 +1412,7 @@ button:disabled {
 
   .field-grid,
   .field-grid.three,
+  .single-param-grid,
   .config-grid,
   .detail-band {
     grid-template-columns: 1fr;
@@ -1305,12 +1469,21 @@ button:disabled {
   .lightbox-nav.next {
     right: 18px;
   }
+
+  .single-hero-image {
+    min-height: 280px;
+    height: min(58dvh, 520px);
+  }
 }
 
 @media (max-width: 460px) {
   .button-row,
   .toggle-row {
     flex-direction: column;
+  }
+
+  .mode-switch {
+    grid-template-columns: 1fr;
   }
 
   .toggle-row select {

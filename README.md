@@ -15,11 +15,13 @@ Red Image Studio 是一个本地运行的 AI 图片工作台，用 `gpt-image-2`
 
 - 小红书图文模式：根据选题生成标题、正文、标签、封面页、内容页和总结页。
 - 淘宝宣传图模式：根据商品或活动生成主图、卖点图、场景图和收口图。
+- 单图生成模式：参考 `gpt_image_playground` 的单图工作流，支持提示词、参考图、结果画廊、放大预览、调整和下载。
 - 自动填写定位：可由文本模型自动补全领域、视觉风格和目标读者/买家。
 - 页面内容编辑：每一页的标题、要点、画面说明和图片提示词都可修改后保存。
 - 图片生成：使用 `images/generations` 生成单页图片。
 - 图片调整：已有图片可输入调整需求，使用 `images/edits` 基于原图修改。
 - 参考图：淘宝模式支持上传参考图，生成时保留商品外观、材质、颜色和结构。
+- 单图参考图：单图模式上传参考图后会调用 `images/edits`，无参考图时调用 `images/generations`。
 - 生成队列：最多 2 个图片请求并发，每次启动请求至少间隔 5 秒。
 - 状态展示：页面卡片区分未生成、排队中、生成中、已完成和失败。
 - 停止生成：可中途停止方案生成或图片队列。
@@ -164,6 +166,8 @@ npm run preview
 - “生成图片”只生成当前选中的页面。
 - “调整图片”只在当前页已有图片时显示，会调用图片编辑接口。
 - “生成整套图片”会把全部页面加入队列。
+- “单图生成”不会创建套图方案，也不会写入套图历史。
+- 单图模式有参考图时使用图片编辑接口；调整已生成图片时使用选中图片作为参考图。
 - 淘宝模式上传参考图后，生成页面会把参考图传给 `images/edits`。
 - 队列最多同时运行 2 个图片请求。
 - 两个请求的启动时间至少间隔 5 秒。
@@ -236,11 +240,13 @@ This project is a fresh implementation. It does not copy source code or prompt f
 
 - Xiaohongshu mode: generate titles, captions, tags, cover pages, content pages, and summary pages from a topic.
 - Taobao mode: generate product hero images, selling-point images, scenario images, and closing promotion images.
+- Single-image mode: a standalone workflow inspired by `gpt_image_playground`, with prompts, optional reference images, a result gallery, large preview, editing, and download.
 - Auto positioning: use a text model to suggest field, visual style, and target reader/buyer.
 - Editable pages: update headline, bullets, visual brief, and image prompt before generation.
 - Image generation: generate one selected page through `images/generations`.
 - Image editing: adjust an existing image through `images/edits` with a custom instruction.
 - Reference images: Taobao mode supports uploaded reference images to preserve product shape, material, color, and structure.
+- Single-image references: in single-image mode, uploaded references call `images/edits`; prompts without references call `images/generations`.
 - Image queue: at most 2 concurrent image requests, with at least 5 seconds between request starts.
 - Clear states: page cards show idle, queued, generating, done, and error states.
 - Stop generation: stop plan generation or the image queue midway.
@@ -385,6 +391,8 @@ Preview the production build.
 - "Generate Image" only generates the selected page.
 - "Adjust Image" appears only when the selected page already has an image, and it calls the image edit API.
 - "Generate Full Set" queues all pages.
+- "Single Image" does not create a carousel plan and does not write to carousel history.
+- In single-image mode, reference images use the image edit API, and adjustments use the selected generated image as the reference.
 - In Taobao mode, an uploaded reference image is sent to `images/edits` for generated pages.
 - The queue runs at most 2 image requests at the same time.
 - Request starts are spaced by at least 5 seconds.
