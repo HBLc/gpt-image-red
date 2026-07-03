@@ -1,6 +1,7 @@
 import cors from 'cors'
 import dotenv from 'dotenv'
 import express from 'express'
+import { existsSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import OpenAI from 'openai'
@@ -12,6 +13,7 @@ dotenv.config()
 
 const app = express()
 const envPath = path.resolve(process.cwd(), '.env')
+const clientDistPath = path.resolve(process.cwd(), 'dist')
 const port = Number(process.env.PORT || 8787)
 const fields: Field[] = ['生活方式', '美妆护肤', '职场效率', '学习成长', '旅行探店', '美食烘焙', '运动健康', '母婴家庭', '家居收纳', '数码工具']
 const visualStyles: VisualStyle[] = ['清爽实用', '杂志质感', '手账拼贴', '专业干货', '温暖日常', '科技极简']
@@ -701,6 +703,13 @@ app.post('/api/image', async (req, res, next) => {
     next(error)
   }
 })
+
+if (existsSync(clientDistPath)) {
+  app.use(express.static(clientDistPath))
+  app.get(/^(?!\/api).*/, (_req, res) => {
+    res.sendFile(path.join(clientDistPath, 'index.html'))
+  })
+}
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   const err = error as { message?: string; status?: number; code?: string; request_id?: string }

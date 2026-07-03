@@ -81,6 +81,32 @@ API 默认地址：
 http://localhost:8787
 ```
 
+## Docker 运行
+
+构建镜像：
+
+```bash
+docker build -t gpt-image-red:local .
+```
+
+使用 `.env` 启动：
+
+```bash
+docker run -d --name gpt-image-red -p 8787:8787 --env-file .env gpt-image-red:local
+```
+
+如果本机 8787 已被占用，可以映射到其他端口：
+
+```bash
+docker run -d --name gpt-image-red -p 8788:8787 --env-file .env gpt-image-red:local
+```
+
+访问：
+
+```text
+http://localhost:8787
+```
+
 ## 环境变量
 
 | 变量 | 默认值 | 说明 |
@@ -270,6 +296,32 @@ http://localhost:5173
 ```
 
 Default API server:
+
+```text
+http://localhost:8787
+```
+
+## Docker
+
+Build the image:
+
+```bash
+docker build -t gpt-image-red:local .
+```
+
+Run with `.env`:
+
+```bash
+docker run -d --name gpt-image-red -p 8787:8787 --env-file .env gpt-image-red:local
+```
+
+If port 8787 is already in use, map it to another local port:
+
+```bash
+docker run -d --name gpt-image-red -p 8788:8787 --env-file .env gpt-image-red:local
+```
+
+Open:
 
 ```text
 http://localhost:8787
