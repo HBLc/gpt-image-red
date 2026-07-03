@@ -1,7 +1,8 @@
 {
   "name": "red-image-studio",
   "version": "0.1.0",
-  "private": true,
+  "license": "MIT",
+  "private": false,
   "type": "module",
   "engines": {
     "node": ">=20"
