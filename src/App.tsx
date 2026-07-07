@@ -26,10 +26,10 @@ import {
   WandSparkles,
   X,
 } from 'lucide-react'
-import { composeProject, generateImage, getEnvConfig, getHealth, saveEnvConfig, suggestSettings } from './api'
+import { composeCompetitionSeries, composeProject, generateImage, getEnvConfig, getHealth, saveEnvConfig, suggestSettings } from './api'
 import { exportProjectZip, toSavedProject } from './exportProject'
 import { clearHistory, clearSingleHistory, getHistoryLimit, loadHistory, loadSingleHistory, rememberProject, rememberSingleImage, saveHistory, saveSingleHistory, updateHistoryLimit } from './storage'
-import type { EnvConfig, Field, HealthResponse, ProjectMode, SavedProject, SavedSingleImage, StudioConfig, VisualStyle, XhsPage, XhsProject } from './types'
+import type { CompetitionSeriesImage, CompetitionSeriesResponse, EnvConfig, Field, HealthResponse, ProjectMode, SavedProject, SavedSingleImage, StudioConfig, VisualStyle, XhsPage, XhsProject } from './types'
 
 const fields: Field[] = ['生活方式', '美妆护肤', '职场效率', '学习成长', '旅行探店', '美食烘焙', '运动健康', '母婴家庭', '家居收纳', '数码工具']
 const styles: VisualStyle[] = ['清爽实用', '杂志质感', '手账拼贴', '专业干货', '温暖日常', '科技极简']
@@ -627,11 +627,13 @@ export default function App() {
     ? '粘贴比赛主题、画面规格、必须包含的元素、禁止事项和评审偏好'
     : SINGLE_DEFAULT_PROMPT
   const singleGenerateButtonText = isSingleBusy
-    ? singleGenerationProgress.total > 1
+    ? singleGenerationProgress.total > 1 && singleGenerationProgress.current === 0
+      ? '规划套图中'
+      : singleGenerationProgress.total > 1
       ? `生成中 ${singleGenerationProgress.current}/${singleGenerationProgress.total}`
       : '生成中'
     : singleCompetitionMode
-      ? '生成比赛图'
+      ? '生成比赛套图'
       : '生成图片'
 
   function currentWorkspaceSnapshot(): ModeWorkspace {
@@ -1149,6 +1151,9 @@ export default function App() {
     quality: typeof SINGLE_IMAGE_QUALITY
     outputFormat: typeof SINGLE_IMAGE_FORMAT
     mode: SavedSingleImage['mode']
+    seriesTitle?: string
+    seriesIndex?: number
+    seriesTotal?: number
   }): SavedSingleImage {
     return {
       id: `single-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -1161,38 +1166,69 @@ export default function App() {
       quality: args.quality,
       outputFormat: args.outputFormat,
       mode: args.mode,
+      seriesTitle: args.seriesTitle,
+      seriesIndex: args.seriesIndex,
+      seriesTotal: args.seriesTotal,
     }
   }
 
   function singleImageModeLabel(item: SavedSingleImage): string {
     if (item.mode === 'edit') return '调整图片'
-    if (item.mode === 'competition') return '比赛图'
+    if (item.mode === 'competition') {
+      return item.seriesIndex && item.seriesTotal
+        ? `比赛套图 ${item.seriesIndex}/${item.seriesTotal}`
+        : '比赛套图'
+    }
     return '生成图片'
   }
 
   function singleImageSourceLabel(item: SavedSingleImage): string {
     if (item.mode === 'edit') return '调整结果'
-    if (item.mode === 'competition') return '比赛模式'
+    if (item.mode === 'competition') return item.seriesTitle || '比赛套图'
     return item.referenceName ? '参考图生成' : '文生图'
   }
 
   function singleImageTitle(item: SavedSingleImage): string {
+    if (item.seriesTitle) return item.seriesTitle
     if (item.mode !== 'competition') return item.prompt
-    const [, requirement] = item.prompt.match(/比赛要求：\n([\s\S]*?)\n\n生成要求：/) ?? []
+    const [, requirement] = item.prompt.match(/比赛要求：\n([\s\S]*?)\n\n(?:统一视觉规范|生成要求)：/) ?? []
     return requirement?.trim() || item.prompt
   }
 
-  function buildSinglePromptText(value: string, competitionMode: boolean, sequence?: { index: number; total: number }): string {
-    if (!competitionMode) return value
+  function formatCompetitionSeriesOutline(plan: CompetitionSeriesResponse): string {
+    return plan.images.map((item) => [
+      `第 ${item.index} 张：${item.title}`,
+      `作用：${item.role}`,
+      `画面任务：${item.visualBrief}`,
+      item.onImageText ? `建议文字：${item.onImageText}` : '',
+    ].filter(Boolean).join('\n')).join('\n\n')
+  }
+
+  function buildCompetitionSeriesPromptText(value: string, plan: CompetitionSeriesResponse, image: CompetitionSeriesImage): string {
     return [
-      '请根据以下比赛要求生成一张参赛图片。',
-      sequence && sequence.total > 1 ? `这是第 ${sequence.index} 张候选方案，共 ${sequence.total} 张。每张都要有不同构图或视觉创意。` : '',
+      '请生成一套参赛系列图中的一张图片。',
+      `这是同一套参赛系列的第 ${image.index} 张，共 ${plan.images.length} 张。`,
+      '这不是互不相关的候选图。必须和同一套比赛要求、同一套视觉规范保持强关联。',
       '',
       '比赛要求：',
       value,
       '',
+      '统一视觉规范：',
+      plan.styleGuide,
+      '',
+      '完整套图结构：',
+      formatCompetitionSeriesOutline(plan),
+      '',
+      '当前图片任务：',
+      `标题：${image.title}`,
+      `作用：${image.role}`,
+      `画面说明：${image.visualBrief}`,
+      image.onImageText ? `画面文字建议：${image.onImageText}` : '',
+      '',
       '生成要求：',
-      '- 画面必须完整满足比赛要求。',
+      '- 当前图片必须完成“当前图片任务”。',
+      '- 必须和整套系列共享同一主色、辅色、字体气质、构图秩序、光影、材质和装饰语言。',
+      '- 当前图片的主体、视角、场景或信息层级要和其他图片不同。',
       '- 视觉完成度高，主体清晰，构图明确。',
       '- 不要生成水印、二维码、平台 UI、版权标识或无关文字。',
     ].filter(Boolean).join('\n')
@@ -1220,8 +1256,18 @@ export default function App() {
     const requestCount = requestCompetitionMode ? clampCompetitionImageCount(competitionImageCount) : 1
     let lastRequestStartedAt = 0
     setSingleGenerationProgress({ current: 0, total: requestCount })
+    if (requestCompetitionMode) {
+      setSingleImageResults([])
+      setSingleSelectedImageId('')
+      setSinglePreviewImageId('')
+    }
 
     try {
+      const seriesPlan = requestCompetitionMode
+        ? await composeCompetitionSeries({ requirement: cleanInput, count: requestCount }, { signal: controller.signal })
+        : null
+      if (controller.signal.aborted) return
+
       for (let index = 1; index <= requestCount; index += 1) {
         if (controller.signal.aborted) return
         const waitMs = lastRequestStartedAt > 0
@@ -1229,7 +1275,10 @@ export default function App() {
           : 0
         await waitWithAbort(waitMs, controller.signal)
         setSingleGenerationProgress({ current: index, total: requestCount })
-        const prompt = buildSinglePromptText(cleanInput, requestCompetitionMode, { index, total: requestCount })
+        const seriesImage = seriesPlan?.images[index - 1]
+        const prompt = requestCompetitionMode && seriesPlan && seriesImage
+          ? buildCompetitionSeriesPromptText(cleanInput, seriesPlan, seriesImage)
+          : cleanInput
         const { project: singleProject, page } = createSingleImageProject({
           prompt,
           size: requestSize,
@@ -1252,10 +1301,15 @@ export default function App() {
           quality: requestQuality,
           outputFormat: requestOutputFormat,
           mode: requestCompetitionMode ? 'competition' : 'generate',
+          seriesTitle: seriesPlan?.title,
+          seriesIndex: requestCompetitionMode ? index : undefined,
+          seriesTotal: requestCompetitionMode ? requestCount : undefined,
         })
         const saved = await rememberSingleImage(nextResult)
         setSingleHistory(saved)
-        setSingleImageResults((current) => [nextResult, ...current.filter((item) => item.id !== nextResult.id)])
+        setSingleImageResults((current) => requestCompetitionMode
+          ? [...current.filter((item) => item.id !== nextResult.id), nextResult]
+          : [nextResult, ...current.filter((item) => item.id !== nextResult.id)])
         setSingleSelectedImageId(nextResult.id)
       }
       setSingleStatus('done')
@@ -2014,7 +2068,7 @@ export default function App() {
 
               {singleCompetitionMode && (
                 <label className="competition-count-row" htmlFor="competition-image-count">
-                  <span>生成数量</span>
+                  <span>套图张数</span>
                   <input
                     id="competition-image-count"
                     type="number"
@@ -2253,7 +2307,7 @@ export default function App() {
               ) : (
                 <div className="empty-state">
                   <ImageIcon size={42} aria-hidden="true" />
-                  <p>{singleCompetitionMode ? '输入比赛要求后生成图片' : '输入提示词后生成图片'}</p>
+                  <p>{singleCompetitionMode ? '输入比赛要求后生成套图' : '输入提示词后生成图片'}</p>
                 </div>
               )}
 

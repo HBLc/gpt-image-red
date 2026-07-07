@@ -1,4 +1,4 @@
-import type { ComposeRequest, ComposeResponse, EnvConfigResponse, GenerateImageRequest, GenerateImageResponse, HealthResponse, SaveEnvConfigRequest, SuggestSettingsRequest, SuggestSettingsResponse } from './types'
+import type { CompetitionSeriesRequest, CompetitionSeriesResponse, ComposeRequest, ComposeResponse, EnvConfigResponse, GenerateImageRequest, GenerateImageResponse, HealthResponse, SaveEnvConfigRequest, SuggestSettingsRequest, SuggestSettingsResponse } from './types'
 
 interface ApiOptions {
   signal?: AbortSignal
@@ -49,6 +49,16 @@ export async function suggestSettings(request: SuggestSettingsRequest): Promise<
     body: JSON.stringify(request),
   })
   return readJson<SuggestSettingsResponse>(response)
+}
+
+export async function composeCompetitionSeries(request: CompetitionSeriesRequest, options: ApiOptions = {}): Promise<CompetitionSeriesResponse> {
+  const response = await fetch('/api/competition-series', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+    signal: options.signal,
+  })
+  return readJson<CompetitionSeriesResponse>(response)
 }
 
 export async function generateImage(request: GenerateImageRequest, options: ApiOptions = {}): Promise<GenerateImageResponse> {

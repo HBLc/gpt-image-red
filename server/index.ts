@@ -5,9 +5,9 @@ import { existsSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import OpenAI from 'openai'
-import type { ComposeRequest, EnvConfigResponse, Field, GenerateImageRequest, HealthResponse, ProjectMode, SaveEnvConfigRequest, SuggestSettingsRequest, SuggestSettingsResponse, VisualStyle, XhsPage, XhsProject } from '../src/types'
+import type { CompetitionSeriesImage, CompetitionSeriesRequest, CompetitionSeriesResponse, ComposeRequest, EnvConfigResponse, Field, GenerateImageRequest, HealthResponse, ProjectMode, SaveEnvConfigRequest, SuggestSettingsRequest, SuggestSettingsResponse, VisualStyle, XhsPage, XhsProject } from '../src/types'
 import { createMockImage, createMockProject } from './mock'
-import { buildContentPrompt, buildImagePrompt, buildSettingsPrompt } from './prompts'
+import { buildCompetitionSeriesPrompt, buildContentPrompt, buildImagePrompt, buildSettingsPrompt } from './prompts'
 
 dotenv.config()
 
@@ -219,6 +219,80 @@ function getMode(config: ComposeRequest['config']): ProjectMode {
 function clampPageCount(value: number, mode: ProjectMode): number {
   const max = mode === 'taobao' ? 8 : 10
   return Math.min(max, Math.max(3, value))
+}
+
+function clampCompetitionCount(value: number): number {
+  if (!Number.isFinite(value)) return 4
+  return Math.min(10, Math.max(1, Math.trunc(value)))
+}
+
+function createMockCompetitionSeries(requirement: string, count: number): CompetitionSeriesResponse {
+  const roles = [
+    ['主视觉', '提炼比赛主题，形成第一眼记忆点'],
+    ['核心概念', '把比赛核心要求转成清晰可读的画面概念'],
+    ['场景延展', '展示主题在真实或想象场景中的应用'],
+    ['细节亮点', '放大关键元素、材质、结构或信息点'],
+    ['过程步骤', '用流程感表达方案如何成立'],
+    ['对比说明', '用前后、左右或层级关系突出优势'],
+    ['成果展示', '呈现最终效果、价值或观众感受'],
+    ['评审记忆点', '用更强的构图收束整套系列'],
+    ['应用拓展', '补充一个可落地的使用场景'],
+    ['总结收口', '把系列主题完整收束成一张总结图'],
+  ]
+
+  const images: CompetitionSeriesImage[] = Array.from({ length: count }, (_, index) => {
+    const [title, role] = roles[index] ?? [`第 ${index + 1} 张`, '补充整套系列的不同视觉侧面']
+    return {
+      index: index + 1,
+      title,
+      role,
+      visualBrief: `${role}。围绕「${requirement.slice(0, 48)}」展开，保持同一套色彩、字体和构图秩序，但改变主体角度与信息层级。`,
+      onImageText: title,
+    }
+  })
+
+  return {
+    title: '参赛系列视觉方案',
+    styleGuide: '统一使用温暖浅底、清晰留白、红绿点缀和杂志式信息层级；标题粗黑醒目，辅文克制；画面保持干净、有秩序、主体明确，使用相同的边距、图标、阴影和几何装饰形成系列感。',
+    images,
+    mock: true,
+  }
+}
+
+function normalizeCompetitionImage(raw: unknown, index: number, requirement: string): CompetitionSeriesImage {
+  const item = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
+  const title = typeof item.title === 'string' && item.title.trim()
+    ? item.title.trim()
+    : `第 ${index + 1} 张`
+  const role = typeof item.role === 'string' && item.role.trim()
+    ? item.role.trim()
+    : '补充整套系列的不同视觉侧面'
+  const visualBrief = typeof item.visualBrief === 'string' && item.visualBrief.trim()
+    ? item.visualBrief.trim()
+    : `围绕「${requirement.slice(0, 48)}」展开，保持系列风格一致。`
+  const onImageText = typeof item.onImageText === 'string' ? item.onImageText.trim() : ''
+  return {
+    index: index + 1,
+    title,
+    role,
+    visualBrief,
+    onImageText,
+  }
+}
+
+function normalizeCompetitionSeries(raw: unknown, request: CompetitionSeriesRequest): CompetitionSeriesResponse {
+  const requirement = request.requirement.trim()
+  const count = clampCompetitionCount(request.count)
+  const data = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
+  const rawImages = Array.isArray(data.images) ? data.images : []
+  const fallback = createMockCompetitionSeries(requirement, count)
+  const images = Array.from({ length: count }, (_, index) => normalizeCompetitionImage(rawImages[index], index, requirement))
+
+  return {
+    title: typeof data.title === 'string' && data.title.trim() ? data.title.trim() : fallback.title,
+    styleGuide: typeof data.styleGuide === 'string' && data.styleGuide.trim() ? data.styleGuide.trim() : fallback.styleGuide,
+    images,
+  }
 }
 
 function normalizePage(raw: unknown, index: number): XhsPage {
@@ -600,6 +674,43 @@ app.post('/api/suggest-settings', async (req, res, next) => {
     } as never)
 
     res.json(normalizeSettings(parseJsonObject(readOutputText(response)), topic))
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/competition-series', async (req, res, next) => {
+  try {
+    const request = req.body as CompetitionSeriesRequest
+    const requirement = request.requirement?.trim()
+    if (!requirement) {
+      res.status(400).json({ error: '请输入比赛要求' })
+      return
+    }
+
+    const count = clampCompetitionCount(Number(request.count))
+    const normalizedRequest = { requirement, count }
+    if (!hasApiKey()) {
+      res.json(createMockCompetitionSeries(requirement, count))
+      return
+    }
+
+    const client = getClient()
+    const response = await client.responses.create({
+      model: getTextModel(),
+      input: [
+        {
+          role: 'system',
+          content: '你只输出严格 JSON。不要解释。不要 Markdown。',
+        },
+        {
+          role: 'user',
+          content: buildCompetitionSeriesPrompt(requirement, count),
+        },
+      ],
+    } as never, { signal: requestAbortSignal(req, res) } as never)
+
+    res.json(normalizeCompetitionSeries(parseJsonObject(readOutputText(response)), normalizedRequest))
   } catch (error) {
     next(error)
   }

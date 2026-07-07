@@ -87,6 +87,43 @@ export function buildSettingsPrompt(topic: string, mode: ProjectMode = 'xhs'): s
   ].join('\n')
 }
 
+export function buildCompetitionSeriesPrompt(requirement: string, count: number): string {
+  return [
+    '你是参赛视觉系列策划。用户会给你比赛要求，你需要把它拆成一套风格统一、内容有关联、每张任务不同的参赛系列图方案。',
+    '输出必须是严格 JSON，不要 Markdown，不要解释。',
+    '',
+    '比赛要求：',
+    requirement,
+    '',
+    `生成张数：${count}`,
+    '',
+    'JSON 结构：',
+    '{',
+    '  "title": "系列标题，12到28个中文字符",',
+    '  "styleGuide": "统一视觉规范，写清主色、辅色、字体气质、构图规则、光影、材质、装饰元素、留白和整体情绪，80到160个中文字符",',
+    '  "images": [',
+    '    {',
+    '      "index": 1,',
+    '      "title": "当前图标题，6到18个中文字符",',
+    '      "role": "当前图在整套参赛系列中的作用",',
+    '      "visualBrief": "当前图画面任务，必须和比赛要求相关，同时和其他图有差异",',
+    '      "onImageText": "建议出现在图上的短文案，可为空"',
+    '    }',
+    '  ]',
+    '}',
+    '',
+    '要求：',
+    '- images 数组必须正好等于生成张数。',
+    '- 每张图都必须服务同一个比赛主题，不要做成互不相关的候选图。',
+    '- 每张图的主体、视角、场景或信息层级要不同。',
+    '- 所有图片必须共享同一套主色、字体气质、材质、光影、构图秩序和装饰元素。',
+    '- 第一张适合作为系列主视觉或总引入。',
+    '- 最后一张适合作为总结、成果展示或评审记忆点。',
+    '- 不要出现水印、二维码、平台 UI、版权标识。',
+    '- 避免裸露、暴力、医疗治疗、真实儿童身体、隐私部位、绝对化功效等高风险画面。',
+  ].join('\n')
+}
+
 export function buildContentPrompt({ topic, config }: ComposeRequest): string {
   if (getMode(config) === 'taobao') {
     return [

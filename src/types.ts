@@ -82,6 +82,26 @@ export interface SuggestSettingsResponse {
   mock?: boolean
 }
 
+export interface CompetitionSeriesRequest {
+  requirement: string
+  count: number
+}
+
+export interface CompetitionSeriesImage {
+  index: number
+  title: string
+  role: string
+  visualBrief: string
+  onImageText?: string
+}
+
+export interface CompetitionSeriesResponse {
+  title: string
+  styleGuide: string
+  images: CompetitionSeriesImage[]
+  mock?: boolean
+}
+
 export interface GenerateImageRequest {
   project: XhsProject
   page: XhsPage
@@ -131,4 +151,7 @@ export interface SavedSingleImage {
   quality: ImageQuality
   outputFormat: ImageFormat
   mode: 'generate' | 'competition' | 'edit'
+  seriesTitle?: string
+  seriesIndex?: number
+  seriesTotal?: number
 }

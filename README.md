@@ -16,7 +16,7 @@ Berlin Image Studio 是一个本地运行的 AI 图片工作台，用 `gpt-image
 - 小红书图文模式：根据选题生成标题、正文、标签、封面页、内容页和总结页。
 - 淘宝宣传图模式：根据商品或活动生成主图、卖点图、场景图和收口图。
 - 单图生成模式：参考 `gpt_image_playground` 的单图工作流，支持提示词、参考图、结果画廊、放大预览、调整和下载。
-- 文生图比赛模式：输入比赛要求，可指定一次生成 1 到 10 张候选图。
+- 文生图比赛模式：输入比赛要求，可指定一次生成 1 到 10 张风格一致、内容关联的参赛系列图。
 - 自动填写定位：可由文本模型自动补全领域、视觉风格和目标读者/买家。
 - 页面内容编辑：每一页的标题、要点、画面说明和图片提示词都可修改后保存。
 - 图片生成：使用 `images/generations` 生成单页图片。
@@ -168,7 +168,7 @@ npm run preview
 - “调整图片”只在当前页已有图片时显示，会调用图片编辑接口。
 - “生成整套图片”会把全部页面加入队列。
 - “单图生成”不会创建套图方案，也不会写入套图历史。
-- 文生图比赛模式会把输入框改为“比赛要求”，并按指定数量生成候选图。
+- 文生图比赛模式会先规划统一视觉规范和分镜，再按指定数量生成同一套参赛系列图。
 - 单图模式有参考图时使用图片编辑接口；调整已生成图片时使用选中图片作为参考图。
 - 淘宝模式上传参考图后，生成页面会把参考图传给 `images/edits`。
 - 队列最多同时运行 2 个图片请求。
@@ -210,6 +210,7 @@ ZIP 包包含：
 - `GET /api/env-config`
 - `POST /api/env-config`
 - `POST /api/suggest-settings`
+- `POST /api/competition-series`
 - `POST /api/compose`
 - `POST /api/image`
 
@@ -244,7 +245,7 @@ This project is a fresh implementation. It does not copy source code or prompt f
 - Xiaohongshu mode: generate titles, captions, tags, cover pages, content pages, and summary pages from a topic.
 - Taobao mode: generate product hero images, selling-point images, scenario images, and closing promotion images.
 - Single-image mode: a standalone workflow inspired by `gpt_image_playground`, with prompts, optional reference images, a result gallery, large preview, editing, and download.
-- Competition mode for text-to-image: enter competition requirements and generate 1 to 10 candidate images at once.
+- Competition mode for text-to-image: enter competition requirements and generate 1 to 10 connected images with one consistent visual system.
 - Auto positioning: use a text model to suggest field, visual style, and target reader/buyer.
 - Editable pages: update headline, bullets, visual brief, and image prompt before generation.
 - Image generation: generate one selected page through `images/generations`.
@@ -396,7 +397,7 @@ Preview the production build.
 - "Adjust Image" appears only when the selected page already has an image, and it calls the image edit API.
 - "Generate Full Set" queues all pages.
 - "Single Image" does not create a carousel plan and does not write to carousel history.
-- Competition mode changes the text-to-image input into competition requirements and generates the requested number of candidates.
+- Competition mode first plans a shared visual system and image-by-image structure, then generates one connected competition series.
 - In single-image mode, reference images use the image edit API, and adjustments use the selected generated image as the reference.
 - In Taobao mode, an uploaded reference image is sent to `images/edits` for generated pages.
 - The queue runs at most 2 image requests at the same time.
@@ -438,6 +439,7 @@ The local API server exposes:
 - `GET /api/env-config`
 - `POST /api/env-config`
 - `POST /api/suggest-settings`
+- `POST /api/competition-series`
 - `POST /api/compose`
 - `POST /api/image`
 
